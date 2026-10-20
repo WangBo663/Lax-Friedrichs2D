@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Temporary verification runs
+outputs/input_validation/
+outputs/popup_validation/
+
+# Local documents and personal data (not part of the solver)
+fill_practice_documents.py
+translate_albada_article.py
+make_formula_preserving_translation.py
+*.docx
+*.pdf
