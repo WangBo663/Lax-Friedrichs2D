@@ -27,3 +27,4 @@ _verify_*.py
 # one-off inspection scripts
 _check_*.py
 _patch_*.py
+_sync_*.py
