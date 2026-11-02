@@ -1,0 +1,5 @@
+method,run,nx,mach,t_end,stable,steps,message,rho_min,p_min,density_tv,oscillation,score
+lax_friedrichs,0,200,2.0,0.3,True,233,,0.138,0.028999999999999974,173.4641296018707,37.26412960187071,373.2826739510339
+maccormack,0,200,2.0,0.05949101830800397,False,50,negative density or pressure,nan,nan,nan,inf,inf
+maccormack_viscous,0,200,2.0,0.3,True,258,,0.13762537137393868,0.02780481133353502,262.27790470877716,126.07790470877717,1261.064170747935
+shasta,0,200,2.0,0.016731695604758474,False,13,negative density or pressure,nan,nan,nan,inf,inf

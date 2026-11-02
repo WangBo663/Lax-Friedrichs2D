@@ -19,3 +19,7 @@ translate_albada_article.py
 make_formula_preserving_translation.py
 *.docx
 *.pdf
+
+# Temporary analysis scripts (kept locally, not part of the deliverable)
+_analyse_case18.py
+_verify_*.py

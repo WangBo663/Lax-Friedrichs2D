@@ -60,6 +60,10 @@ class SimulationConfig:
     mach: float = 2.0
     viscosity_b: float = 1.0
     shasta_limiter: bool = True
+    # Only used by test 10 (homework Case 18): "contact" reproduces the
+    # verbatim initial condition of the assignment, "shock" adds the M = 3
+    # incident shock that makes the wall-reflection flow field exist.
+    case18_mode: str = "contact"
 
 
 @dataclass
@@ -83,6 +87,21 @@ def domain_for_test(test_case: int, nx: int) -> np.ndarray:
     if test_case == 6:
         return np.linspace(0.0, 1.0, nx)
     return np.linspace(-0.5, 0.5, nx)
+
+
+def domain_2d_for_test(test_case: int, nx: int, ny: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return the (x, y) coordinate arrays for a test.
+
+    Tests 1-6 are 1D problems lifted to 2D: x keeps the coursework domain and
+    y spans the same interval.  Tests 7-9 are genuine 2D Riemann problems from
+    Liska & Wendroff (2001): cases 3 and 4 live on the square (0, 1)^2 and the
+    implosion diamond on the quarter box (0, 0.3)^2 (section 4.7 of the paper).
+    """
+    if test_case in (7, 8, 10):
+        return np.linspace(0.0, 1.0, nx), np.linspace(0.0, 1.0, ny)
+    if test_case == 9:
+        return np.linspace(0.0, 0.3, nx), np.linspace(0.0, 0.3, ny)
+    return domain_for_test(test_case, nx), np.linspace(-0.5, 0.5, ny)
 
 
 def shock_relations(mach: float, gamma: float = GAMMA) -> dict[str, float]:
@@ -120,6 +139,35 @@ def shock_relations(mach: float, gamma: float = GAMMA) -> dict[str, float]:
     }
 
 
+def shock_relations_into(rho1: float, p1: float, u1: float, mach: float,
+                         gamma: float = GAMMA) -> dict[str, float]:
+    """Rankine-Hugoniot state behind a shock of Mach `mach` running into a
+    uniform upstream state (rho1, p1, u1).
+
+    Unlike `shock_relations`, which is hard-wired to rho = p = 1 at rest, this
+    version accepts an arbitrary upstream state so the Case 18 "shock" mode
+    can send a Mach-3 shock into the rho = 1/3, p = 1 half of the domain.
+
+    The upstream sound speed is a = sqrt(gamma * p1 / rho1); the shock travels
+    at D = u1 + mach * a.  The post-shock state follows the standard density
+    and pressure ratios.
+    """
+    sound = float(np.sqrt(gamma * p1 / rho1))
+    shock_speed = u1 + mach * sound
+    density_ratio = ((gamma + 1.0) * mach**2) / ((gamma - 1.0) * mach**2 + 2.0)
+    pressure_ratio = (2.0 * gamma * mach**2 - (gamma - 1.0)) / (gamma + 1.0)
+    rho_post = rho1 * density_ratio
+    p_post = p1 * pressure_ratio
+    u_post = shock_speed - mach * sound * (density_ratio - 1.0) / density_ratio
+    return {
+        "sound": sound,
+        "shock_speed": shock_speed,
+        "rho_post": rho_post,
+        "p_post": p_post,
+        "u_post": u_post,
+    }
+
+
 def default_nx(test_case: int) -> int:
     """Per-test grid size.
 
@@ -134,6 +182,19 @@ def default_nx(test_case: int) -> int:
         return 300
     if test_case == 5:
         return 200
+    if test_case == 9:
+        # The implosion needs square cells and at least ~150 cells across the
+        # diamond half-width for the reflected-wave structure to be visible.
+        return 150
+    if test_case in (7, 8):
+        # Liska & Wendroff present 400x400; 200x200 keeps one U array at
+        # ~0.6 MB and the solver peak under ~300 MB on a 16 GB laptop.
+        # Pass --nx 400 to reproduce the paper's resolution.
+        return 200
+    if test_case == 10:
+        # Homework Case 18 runs a grid-convergence study at 300x300 and
+        # 1000x1000; 300 is the cheap first pass.
+        return 300
     return 300
 
 
@@ -147,7 +208,7 @@ def default_cfl(test_case: int) -> float:
     when the time step is too large — the 1D scheme has no second
     direction to confuse the predictor/corrector.
     """
-    if test_case in (1, 2, 3, 4, 5, 6):
+    if test_case in (1, 2, 3, 4, 5, 6, 9, 10):
         return 0.4
     return 0.9
 
@@ -165,7 +226,14 @@ def default_end_time(test_case: int, mach: float = 2.0) -> float:
         # x = 0.5 to x = 0.2.  For M=2 this gives t = 0.4648, identical to
         # the 1D README's Test 4.
         return 0.5 / relations["incident_speed"] + 0.3 / relations["reflected_speed"]
-    return 0.2
+    if test_case == 7:
+        return 0.3      # Liska Table 5, case 3
+    if test_case == 8:
+        return 0.25     # Liska Table 5, case 4
+    if test_case == 9:
+        return 0.045    # implosion early stage; late stage is T = 2.5 (pass --t-end 2.5)
+    if test_case == 10:
+        return 0.2      # homework Case 18: T = 0.2 (assignment default)
     return 0.2
 
 
@@ -177,6 +245,14 @@ def default_runs(test_case: int) -> list[tuple[int, int, float, float, float]]:
     """
     nx = default_nx(test_case)
     cfl = default_cfl(test_case)
+    # Tests 7-10 are genuine 2D problems on a square: ny = nx keeps the cells
+    # square as in the reference figures.
+    if test_case in (7, 8, 9):
+        return [(nx, nx, cfl, default_end_time(test_case, 2.0), 2.0)]
+    if test_case == 10:
+        # Homework Case 18.  A single 300x300 grid is enough for the
+        # assignment's figure; pass --nx 1000 --ny 1000 for the finer run.
+        return [(300, 300, cfl, default_end_time(test_case, 2.0), 3.0)]
     # Test 6's x interval [0,1] is small, so we keep ny modest (≈ nx/10) to
     # fit the 2D array in memory on a typical laptop.
     if test_case == 6:
@@ -212,6 +288,11 @@ def boundary_kind(test_case: int) -> str:
         4: "right",  # right wall reflects, left wall zero-gradient
         5: "both",   # explosion between two reflecting walls
         6: "none",   # Shu-Osher on [0, 1], periodic-like / open ends
+        7: "none",   # Liska case 3: open square, waves leave the domain
+        8: "none",   # Liska case 4: open square
+        9: "all",    # implosion: reflecting walls on all four sides (sec. 4.7)
+        10: "right", # homework Case 18: reflecting wall at x = 1 only;
+                     # x = 0 and y = 0, 1 use zero-gradient extrapolation
     }.get(test_case, "none")
 
 
@@ -324,6 +405,120 @@ def init_test(test_case: int, x: np.ndarray, ny: int, gamma: float,
     return rho_1d, u_1d, v_1d, p_1d, X
 
 
+def init_test_2d(test_case: int, x: np.ndarray, y: np.ndarray,
+                 gamma: float = GAMMA, case18_mode: str = "contact",
+                 mach: float = 3.0) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Genuine 2D initial conditions from Liska & Wendroff (2001), Table 5 and section 4.7.
+
+    The square is divided into four quadrants by the lines x = 1/2, y = 1/2
+    (implosion: diamond centred at the box centre with corners on the axes).
+    Every 1D Riemann problem between two neighbouring quadrants carries exactly
+    one wave; the four waves then interact in the centre.  There is no exact
+    solution, the reference pictures are density contours over a pressure
+    colour map on a 400x400 grid.
+
+    Tests
+    -----
+    7 : Liska case 3  (S,S,S,S),  T = 0.3
+    8 : Liska case 4  (S,S,S,S),  T = 0.25
+    9 : implosion diamond, reflecting walls, T = 0.045 (early) / 2.5 (late)
+    10: **homework Case 18** (not a Liska case).  A vertical equal-pressure
+        contact discontinuity at x = 1/2 on the unit square, with a reflecting
+        wall at x = 1.  Two initialisation modes are provided:
+
+        ``"contact"`` (default, the verbatim assignment statement)
+            x < 1/2 : rho = 1,     p = 1, u = v = 0
+            x > 1/2 : rho = 1/3,   p = 1, u = v = 0
+            Everything is at rest, so the only feature is the stationary
+            contact.  No wave reaches the wall on its own.
+
+        ``"shock"`` (adds the M = 3 incident shock the notes talk about)
+            The left half is filled with the Rankine-Hugoniot post-shock state
+            of a Mach-``mach`` shock travelling to the right, so the flow really
+            does hit the reflecting wall at x = 1 and a reflected shock with an
+            M = 3 region behind it develops.  The right half keeps the
+            rho = 1/3, p = 1 state of the assignment.
+
+    Returns
+    -------
+    rho, u, v, p : ndarrays of shape (ny, nx)
+    """
+    rho = np.ones((y.size, x.size))
+    u = np.zeros((y.size, x.size))
+    v = np.zeros((y.size, x.size))
+    p = np.ones((y.size, x.size))
+
+    if test_case in (7, 8):
+        # Quadrant states (p, rho, u, v) straight from Table 5.  The paper's
+        # quadrant layout: left = upper/lower LEFT columns, right = RIGHT.
+        if test_case == 7:      # case 3, T = 0.3
+            upper_left = (0.3, 0.5323, 1.206, 0.0)
+            lower_left = (0.029, 0.138, 1.206, 1.206)
+            upper_right = (1.5, 1.5, 0.0, 0.0)
+            lower_right = (0.3, 0.5323, 0.0, 1.206)
+        else:                    # case 4, T = 0.25
+            upper_left = (0.35, 0.5065, 0.8939, 0.0)
+            lower_left = (1.1, 1.1, 0.8939, 0.8939)
+            upper_right = (1.1, 1.1, 0.0, 0.0)
+            lower_right = (0.35, 0.5065, 0.0, 0.8939)
+
+        # Table 5 lists "left" = left column of quadrants, "right" = right
+        # column; upper/lower split at y = 1/2.  Cell centres decide.
+        x_mid = 0.5 * (x[0] + x[-1])
+        y_mid = 0.5 * (y[0] + y[-1])
+        left_x = x < x_mid
+        lower_y = y < y_mid
+        # upper-left
+        mask = ~lower_y[:, None] & left_x[None, :]
+        pp, rr, uu, vv = upper_left
+        p[mask], rho[mask], u[mask], v[mask] = pp, rr, uu, vv
+        # lower-left
+        mask = lower_y[:, None] & left_x[None, :]
+        pp, rr, uu, vv = lower_left
+        p[mask], rho[mask], u[mask], v[mask] = pp, rr, uu, vv
+        # upper-right
+        mask = ~lower_y[:, None] & ~left_x[None, :]
+        pp, rr, uu, vv = upper_right
+        p[mask], rho[mask], u[mask], v[mask] = pp, rr, uu, vv
+        # lower-right
+        mask = lower_y[:, None] & ~left_x[None, :]
+        pp, rr, uu, vv = lower_right
+        p[mask], rho[mask], u[mask], v[mask] = pp, rr, uu, vv
+
+    elif test_case == 9:
+        # Implosion diamond: box (0, 0.3)^2, diamond corners at (0.15, 0) and
+        # (0, 0.15) - i.e. |x - 0.15| + |y - 0.15| < 0.15 is inside the diamond.
+        inside = (np.abs(x[None, :] - 0.15) + np.abs(y[:, None] - 0.15)) < 0.15
+        rho[inside] = 0.125
+        p[inside] = 0.14
+
+    elif test_case == 10:
+        # Homework Case 18: vertical equal-pressure contact discontinuity at
+        # x = 1/2 on the unit square [0,1]^2, everything initially at rest.
+        x_mid = 0.5 * (x[0] + x[-1])
+        right_mask = x > x_mid          # (nx,) boolean along x
+        if case18_mode == "shock":
+            # Add the M = 3 incident shock described in the notes so the flow
+            # really reaches the reflecting wall at x = 1.  The shock front
+            # sits on the V.B. line x = 1/2 and runs into the right-hand gas
+            # (rho = 1/3, p = 1, at rest); the left half carries the
+            # Rankine-Hugoniot post-shock state.
+            relations = shock_relations_into(1.0 / 3.0, 1.0, 0.0, mach, gamma)
+            rho[:, right_mask] = 1.0 / 3.0
+            rho[:, ~right_mask] = relations["rho_post"]
+            p[:, ~right_mask] = relations["p_post"]
+            u[:, ~right_mask] = relations["u_post"]
+        else:
+            # Verbatim assignment initialisation: two equal-pressure states
+            # differing only in density, both at rest.
+            rho[:, right_mask] = 1.0 / 3.0
+
+    else:
+        raise ValueError("test_case must be 7, 8, 9 or 10 for genuine 2D problems")
+
+    return rho, u, v, p
+
+
 # ---------------------------------------------------------------------------
 # Boundary conditions
 # ---------------------------------------------------------------------------
@@ -356,9 +551,16 @@ def apply_ghost_bc(U: np.ndarray, test_case: int) -> np.ndarray:
         U[1, 1:-1, -1] = -U[1, 1:-1, -2]
     else:
         U[:, 1:-1, -1] = U[:, 1:-1, -2]
-    # y walls: in 2D we always copy along y because the y direction carries no
-    U[:, 0, :] = U[:, 1, :]
-    U[:, -1, :] = U[:, -2, :]
+    # y walls: zero-gradient in every case except the fully reflecting "all"
+    # boundary of the implosion, where the y momentum must also flip sign.
+    if kind == "all":
+        U[:, 0, :] = U[:, 1, :]
+        U[2, 0, :] = -U[2, 1, :]
+        U[:, -1, :] = U[:, -2, :]
+        U[2, -1, :] = -U[2, -2, :]
+    else:
+        U[:, 0, :] = U[:, 1, :]
+        U[:, -1, :] = U[:, -2, :]
     # Corners: copy the nearest physical cell.
     U[:, 0, 0] = U[:, 1, 1]
     U[:, 0, -1] = U[:, 1, -2]
@@ -631,13 +833,19 @@ def build_overview_figure(output_dir: Path, show: bool = False) -> Path:
 
 def advance(config: SimulationConfig, method: str) -> SimulationResult:
     """Integrate one test problem and return a result instead of crashing on failure."""
-    x = domain_for_test(config.test_case, config.nx)
-    y = np.linspace(-0.5, 0.5, config.ny)
+    if config.test_case in (7, 8, 9, 10):
+        x, y = domain_2d_for_test(config.test_case, config.nx, config.ny)
+        rho_init, u_init, v_init, p_init = init_test_2d(
+            config.test_case, x, y, GAMMA, config.case18_mode, config.mach
+        )
+    else:
+        x = domain_for_test(config.test_case, config.nx)
+        y = np.linspace(-0.5, 0.5, config.ny)
+        rho_init, u_init, v_init, p_init, _ = init_test(
+            config.test_case, x, config.ny, GAMMA, config.mach
+        )
     dx = x[1] - x[0]
     dy = y[1] - y[0]
-    rho_init, u_init, v_init, p_init, _ = init_test(
-        config.test_case, x, config.ny, GAMMA, config.mach
-    )
     U_phys = prim2cons(rho_init, u_init, v_init, p_init, GAMMA)
     U = _add_ghost(U_phys)
     apply_ghost_bc(U, config.test_case)
@@ -760,6 +968,71 @@ def physical_diagnostics(result: SimulationResult, config: SimulationConfig) -> 
             "u_w": float(u_x[-1]),
         }
 
+    if config.test_case == 10:
+        # Homework Case 18.  The initial condition is a vertical equal-pressure
+        # contact at x = 0.5 with a reflecting wall at x = 1.  Diagnostics:
+        # contact width (how much the first-order LF smears the discontinuity),
+        # where the pressure front sits, and the state next to the wall.
+        rho_mean = np.mean(rho, axis=0)
+        p_mean = np.mean(p, axis=0)
+        u_mean = np.mean(u, axis=0)
+
+        # Left/right plateau values are read off the initial condition so the
+        # measure works for both the "contact" and the "shock" initialisation.
+        rho_init_mean = np.mean(result.initial_rho, axis=0)
+        left_state = float(rho_init_mean[0])
+        right_state = float(rho_init_mean[-1])
+        span = abs(left_state - right_state)
+
+        # Contact width: the distance over which the density travels from 90%
+        # to 10% of the way between the two plateau values.  The density falls
+        # from left to right, so the rho = 0.933 crossing (10% of the way down)
+        # comes first and the rho = 0.4 crossing (90% of the way down) second.
+        contact_width = float("nan")
+        contact_cells = float("nan")
+        if span > EPS:
+            level_90 = left_state - 0.9 * span
+            level_10 = left_state - 0.1 * span
+            idx_90 = np.where(rho_mean <= level_90)[0]
+            idx_10 = np.where(rho_mean <= level_10)[0]
+            if idx_90.size and idx_10.size:
+                contact_width = float(x[idx_90[0]] - x[idx_10[0]])
+                contact_cells = contact_width * x.size
+        else:
+            level_90 = level_10 = float("nan")
+
+        # Shock front: the steepest pressure gradient along x.  In "contact"
+        # mode the pressure never changes, so the result is NaN.
+        dpx = np.abs(np.diff(p_mean))
+        if float(np.max(dpx)) > 1.0e-3:
+            front_x = float(0.5 * (x[int(np.argmax(dpx))] + x[int(np.argmax(dpx)) + 1]))
+        else:
+            front_x = float("nan")
+        # Exact front position for the "shock" initialisation: the Mach-3
+        # incident shock leaves x = 0.5 at t = 0.
+        if config.case18_mode == "shock":
+            relations = shock_relations_into(1.0 / 3.0, 1.0, 0.0, config.mach, GAMMA)
+            exact_front = 0.5 + relations["shock_speed"] * result.time
+        else:
+            exact_front = float("nan")
+
+        return {
+            "contact_x": 0.5,
+            "contact_width": contact_width,
+            "contact_cells": contact_cells,
+            "rho_left": left_state,
+            "rho_right": right_state,
+            "front_x": front_x,
+            "front_x_theory": exact_front,
+            "front_error": abs(front_x - exact_front) if exact_front == exact_front else float("nan"),
+            "p_wall": float(p_mean[-1]),
+            "p_max": float(np.max(p_mean)),
+            "rho_wall": float(rho_mean[-1]),
+            "u_wall": float(u_mean[-1]),
+            "u_max": float(np.max(np.abs(u_mean))),
+            "M_max": float(np.max(np.abs(u_mean) / np.sqrt(GAMMA * p_mean / np.maximum(rho_mean, EPS)))),
+        }
+
     return {}
 
 
@@ -797,6 +1070,20 @@ def print_diagnostics_table(test_case: int,
             print(
                 f"{name:<22}{values['P1']:>9.4f}{values['P_w']:>10.4f}{values['DP']:>9.4f}"
                 f"{values['rho_w']:>9.4f}{values['u_w']:>10.4f}"
+            )
+
+    elif test_case == 10:
+        print("===== Case 18: contact discontinuity, reflecting wall at x = 1 =====")
+        print(
+            f"{'Scheme':<22}{'contact w':>11}{'cells':>8}{'front x':>10}"
+            f"{'err':>9}{'p_wall':>10}{'p_max':>10}{'u_max':>10}{'M_max':>9}"
+        )
+        for name, values in entries:
+            print(
+                f"{name:<22}{values['contact_width']:>11.5f}{values['contact_cells']:>8.1f}"
+                f"{values['front_x']:>10.4f}{values['front_error']:>9.4f}"
+                f"{values['p_wall']:>10.4f}{values['p_max']:>10.4f}"
+                f"{values['u_max']:>10.4f}{values['M_max']:>9.4f}"
             )
 
 
@@ -861,6 +1148,187 @@ def write_csv(path: Path, rows: list[dict[str, float | str]]) -> None:
 # ---------------------------------------------------------------------------
 # Visualisation
 # ---------------------------------------------------------------------------
+def plot_riemann_2d(results: list[SimulationResult], output: Path, test_case: int,
+                    show: bool = True) -> None:
+    """Liska & Wendroff style presentation for the genuine 2D Riemann problems:
+    one panel per stable scheme, pressure as colour, density as filled contours
+    and velocity arrows on a coarse grid.
+
+    Contour levels follow the paper: case 3 uses 32 contours from 0.16 to 1.71,
+    case 4 uses 29 contours from 0.52 to 1.92, and the implosion uses 36 contours
+    from 0.125 to 1 (all step 0.05 / 0.025).  Test 10 is not a Liska case and
+    uses its own pressure-contour plot instead (see plot_case18_2d).
+    """
+    valid = [r for r in results if r.stable]
+    if not valid:
+        return
+    if test_case == 7:
+        levels = np.arange(0.16, 1.71 + 1e-9, 0.05)
+    elif test_case == 8:
+        levels = np.arange(0.52, 1.92 + 1e-9, 0.05)
+    else:
+        levels = np.arange(0.125, 1.0 + 1e-9, 0.025)
+
+    n = len(valid)
+    cols = min(n, 2)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(7.5 * cols, 6.5 * rows),
+                             squeeze=False, constrained_layout=True)
+    for index, result in enumerate(valid):
+        ax = axes[index // cols][index % cols]
+        rho, u, v, p = cons2prim(result.U, GAMMA)
+        mesh = ax.pcolormesh(result.x, result.y, p, cmap="magma", shading="auto")
+        fig.colorbar(mesh, ax=ax, shrink=0.85, label="pressure")
+        ax.contour(result.x, result.y, rho, levels=levels, colors="black", linewidths=0.5)
+        # Velocity arrows on a coarse subsample, as in the paper's figures.
+        stride = max(1, result.x.size // 20)
+        xs = result.x[::stride]
+        ys = result.y[::stride]
+        ax.quiver(xs, ys, u[::stride, ::stride], v[::stride, ::stride],
+                  color="white", scale=30, width=0.003, alpha=0.9)
+        ax.set_title(f"{result.method}  (t = {result.time:.4g}, {result.steps} steps)")
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_aspect("equal")
+    for leftover in range(n, rows * cols):
+        axes[leftover // cols][leftover % cols].axis("off")
+    names = {7: "Liska case 3", 8: "Liska case 4", 9: "Implosion diamond"}
+    fig.suptitle(f"{names.get(test_case, f'Test {test_case}')} — pressure colour map, "
+                 f"density contours, velocity arrows", fontsize=13)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=150)
+    if show:
+        plt.show()
+    plt.close(fig)
+
+
+def plot_case18_2d(results: list[SimulationResult], output: Path, test_case: int = 10,
+                    grid_label: str = "", show: bool = True) -> None:
+    """Homework Case 18 presentation: pressure colour map, pressure contours with
+    a fixed spacing of dP = 0.1 and velocity arrows.
+
+    The assignment asks for the three layers on top of each other:
+
+    * a pressure cloud map (pcolormesh),
+    * pressure isolines with a constant step dP = 0.1,
+    * the velocity field drawn as quiver arrows.
+
+    One panel per stable scheme.  ``grid_label`` carries the grid size so the
+    300x300 and 1000x1000 pictures can be compared directly.
+    """
+    valid = [r for r in results if r.stable]
+    if not valid:
+        return
+
+    n = len(valid)
+    cols = min(n, 2)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(7.5 * cols, 6.5 * rows),
+                             squeeze=False, constrained_layout=True)
+    for index, result in enumerate(valid):
+        ax = axes[index // cols][index % cols]
+        rho, u, v, p = cons2prim(result.U, GAMMA)
+        speed_of_sound = np.sqrt(GAMMA * p / np.maximum(rho, EPS))
+        mach = np.abs(u) / np.maximum(speed_of_sound, EPS)
+
+        mesh = ax.pcolormesh(result.x, result.y, p, cmap="magma", shading="auto")
+        fig.colorbar(mesh, ax=ax, shrink=0.85, label="pressure")
+
+        # Pressure isolines with the required spacing dP = 0.1.  The levels are
+        # derived from the actual pressure range so the picture is meaningful
+        # for both the trivial "contact" initialisation (p = 1 everywhere) and
+        # the shock-driven variant (p from ~5 up to ~19 near the wall).
+        # The step is kept at exactly 0.1 as the assignment requires, so the
+        # lines are drawn thin and semi-transparent to stay readable.
+        p_lo = float(np.min(p))
+        p_hi = float(np.max(p))
+        first = np.floor(p_lo / 0.1) * 0.1
+        last = np.ceil(p_hi / 0.1) * 0.1
+        levels = np.arange(first, last + 1.0e-9, 0.1)
+        levels = levels[(levels >= p_lo - 1.0e-9) & (levels <= p_hi + 1.0e-9)]
+        dp = 0.1
+        if levels.size >= 2:
+            ax.contour(result.x, result.y, p, levels=levels, colors="cyan",
+                       linewidths=0.35, alpha=0.6)
+        # Density contours make the smeared contact discontinuity visible.
+        rho_lo = float(np.min(rho))
+        rho_hi = float(np.max(rho))
+        rho_levels = np.arange(np.ceil(rho_lo * 10.0) / 10.0,
+                                np.floor(rho_hi * 10.0) / 10.0 + 1.0e-9, 0.1)
+        if rho_levels.size >= 2:
+            ax.contour(result.x, result.y, rho, levels=rho_levels, colors="white",
+                       linewidths=0.4, alpha=0.45)
+        # Highlight the initial contact line x = 0.5 for reference.
+        ax.axvline(0.5, color="lime", linestyle="--", linewidth=1.0, alpha=0.8)
+
+        # Velocity arrows on a coarse subsample.  The scale is chosen from the
+        # peak speed so the arrows stay readable in both the quiescent
+        # "contact" case and the fast "shock" case.
+        stride = max(1, result.x.size // 25)
+        xs = result.x[::stride]
+        ys = result.y[::stride]
+        u_s = u[::stride, ::stride]
+        v_s = v[::stride, ::stride]
+        peak = max(float(np.max(np.abs(u_s))), float(np.max(np.abs(v_s))), 1.0e-6)
+        ax.quiver(xs, ys, u_s, v_s, color="white",
+                  scale=8.0 * peak, width=0.004, alpha=0.95,
+                  pivot="middle")
+
+        ax.set_title(f"{result.method}  (t = {result.time:.4g}, {result.steps} steps)")
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_aspect("equal")
+        ax.text(0.02, 0.98,
+                f"grid {grid_label}\np in [{p_lo:.4g}, {p_hi:.4g}]\n"
+                f"{levels.size} pressure contours (dP = {dp:g})\n"
+                f"max|M| = {float(np.max(mach)):.3f}",
+                transform=ax.transAxes, fontsize=8, va="top",
+                bbox=dict(boxstyle="round", facecolor="black", alpha=0.6,
+                          edgecolor="none"), color="white")
+    for leftover in range(n, rows * cols):
+        axes[leftover // cols][leftover % cols].axis("off")
+    fig.suptitle("Case 18 — pressure colour map, pressure contours (dP = 0.1), "
+                 "velocity arrows", fontsize=13)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=150)
+    if show:
+        plt.show()
+    plt.close(fig)
+
+
+def plot_case18_convergence(per_grid: list[tuple[int, list[SimulationResult]]],
+                             output: Path, method: str = "lax_friedrichs",
+                             show: bool = True) -> None:
+    """Grid-convergence panel for Case 18: x-profiles of the two resolutions
+    side by side plus their difference, all for the same scheme."""
+    if not per_grid:
+        return
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.6), constrained_layout=True)
+    colours = ("C0", "C1")
+    for slot, (nx, results) in enumerate(per_grid):
+        match = [r for r in results if r.method == method and r.stable]
+        if not match:
+            continue
+        result = match[0]
+        rho, u, v, p = cons2prim(result.U, GAMMA)
+        axes[0].plot(result.x, np.mean(rho, axis=0), color=colours[slot], label=f"{nx}x{nx}")
+        axes[1].plot(result.x, np.mean(u, axis=0), color=colours[slot], label=f"{nx}x{nx}")
+        axes[2].plot(result.x, np.mean(p, axis=0), color=colours[slot], label=f"{nx}x{nx}")
+    axes[0].set_title(r"mean density $\rho$ vs x")
+    axes[1].set_title(r"mean velocity $u$ vs x")
+    axes[2].set_title(r"mean pressure $p$ vs x")
+    for axis in axes:
+        axis.set_xlabel("x")
+        axis.grid(True, alpha=0.3)
+        axis.legend(loc="best", fontsize=8)
+    fig.suptitle(f"Case 18 grid convergence — {method}", fontsize=13)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=150)
+    if show:
+        plt.show()
+    plt.close(fig)
+
+
 def plot_results_2d(results: list[SimulationResult], output: Path, test_case: int,
                     show: bool = True) -> None:
     """One figure per end time, 3 columns (density, velocity, pressure), 1 row per scheme.
@@ -972,8 +1440,10 @@ def plot_time_grid(results_by_time: list[tuple[float, list[SimulationResult]]],
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="2D Euler: Lax-Friedrichs, MacCormack and SHASTA/FCT")
     parser.add_argument(
-        "--test", type=int, default=None, choices=range(1, 7),
-        help="Original coursework test number (1-6). Prompts interactively when omitted.",
+        "--test", type=int, default=None, choices=range(1, 11),
+        help="Test number: 1-6 original coursework, 7-10 Liska & Wendroff 2D Riemann "
+             "problems (7=case 3, 8=case 4, 9=implosion, 10=case 17 aka case 18). "
+             "Prompts interactively when omitted.",
     )
     parser.add_argument("--method", choices=[*METHODS, "all"], default="all")
     parser.add_argument(
@@ -996,6 +1466,12 @@ def parse_args() -> argparse.Namespace:
                         help="Mach number for tests 1, 2 and 4 (default: per-test sweep)")
     parser.add_argument("--b", type=float, default=1.0,
                         help="Artificial-viscosity coefficient b of equation (41)")
+    parser.add_argument(
+        "--case18-mode", choices=["contact", "shock"], default="contact",
+        help="Test 10 (homework Case 18) initialisation: 'contact' is the verbatim "
+             "assignment statement (two equal-pressure states at rest), 'shock' adds "
+             "the M=3 incident shock so the flow reaches the reflecting wall at x=1.",
+    )
     parser.add_argument(
         "--scan-viscosity", action="store_true",
         help="Try b = 0, 0.2, 0.5, 1.0, 1.5, 2.0 and select the best physical case",
@@ -1023,17 +1499,17 @@ def parse_args() -> argparse.Namespace:
 
 def prompt_for_test_case() -> int:
     while True:
-        raw_value = input("Please enter the test number (1-6, press Enter for default 3): ").strip()
+        raw_value = input("Please enter the test number (1-10, press Enter for default 3): ").strip()
         if not raw_value:
             return 3
         try:
             test_case = int(raw_value)
         except ValueError:
-            print("Invalid input: please enter an integer between 1 and 6.")
+            print("Invalid input: please enter an integer between 1 and 10.")
             continue
-        if test_case in range(1, 7):
+        if test_case in range(1, 11):
             return test_case
-        print("Invalid input: the test number must be between 1 and 6.")
+        print("Invalid input: the test number must be between 1 and 10.")
 
 
 def main() -> None:
@@ -1065,7 +1541,7 @@ def main() -> None:
         nx = args.nx if args.nx is not None else default_nx(test_case)
         ny = args.ny if args.ny is not None else max(50, nx // 4)
         cfl = args.cfl if args.cfl is not None else default_cfl(test_case)
-        mach = args.mach if args.mach is not None else 2.0
+        mach = args.mach if args.mach is not None else (3.0 if test_case == 10 else 2.0)
         t_end = args.t_end[0] if args.t_end else None
         if t_end is None or t_end <= 0.0:
             t_end = default_end_time(test_case, mach)
@@ -1085,6 +1561,7 @@ def main() -> None:
     rows: list[dict[str, float | str]] = []
     results_by_time: list[tuple[float, list[SimulationResult]]] = []
     sweep_labels: list[str] = []
+    case18_grids: list[tuple[int, list[SimulationResult]]] = []
 
     for spec_index, (nx, ny, cfl, t_end, mach) in enumerate(run_specs):
         if not 0.0 < cfl <= 1.0:
@@ -1097,7 +1574,10 @@ def main() -> None:
                 "the FCT/SHASTA schemes may not stay monotone."
             )
 
-        run_config = SimulationConfig(test_case, nx, ny, cfl, t_end, mach, args.b, not args.no_limiter)
+        run_config = SimulationConfig(
+            test_case, nx, ny, cfl, t_end, mach, args.b, not args.no_limiter,
+            args.case18_mode,
+        )
 
         if len(run_specs) > 1:
             label = f"nx={nx} mach={mach:g} t_end={t_end:g}"
@@ -1140,20 +1620,50 @@ def main() -> None:
                 f"rho_min={metrics['rho_min']:.4e} p_min={metrics['p_min']:.4e} score={metrics['score']:.4e}"
             )
 
-        if len(diagnostics_per_method) == 1:
+        if test_case in (7, 8, 9):
+            # Genuine 2D Riemann problems have no exact solution; the reference
+            # comparison is visual (density contours over a pressure map).
+            print("\n(no analytic diagnostics for this test — compare the contour "
+                  "plot against Liska & Wendroff 2001)")
+        elif test_case == 10:
+            if len(diagnostics_per_method) == 1:
+                print_diagnostics_single(test_case, diagnostics_per_method[0][1])
+            else:
+                print_diagnostics_table(test_case, diagnostics_per_method)
+        elif len(diagnostics_per_method) == 1:
             print_diagnostics_single(test_case, diagnostics_per_method[0][1])
         else:
             print_diagnostics_table(test_case, diagnostics_per_method)
 
         actual_time = max((r.time for r in results), default=0.0)
         results_by_time.append((actual_time, results))
+        if test_case == 10:
+            case18_grids.append((nx, results))
 
     summary_path = args.output_dir / f"test{test_case}_comparison.csv"
     write_csv(summary_path, rows)
     print(f"\nComparison saved to: {summary_path}")
 
     plot_path = args.output_dir / f"test{test_case}_comparison.png"
-    if len(results_by_time) > 1:
+    if test_case == 10:
+        # One picture per resolution, so a finer second run never overwrites
+        # the first one.  With a single grid the plain name is used as well.
+        for nx, results in case18_grids:
+            grid_path = args.output_dir / f"test10_comparison_nx{nx}.png"
+            plot_case18_2d(results, grid_path, test_case,
+                           grid_label=f"{nx}x{nx}", show=not args.no_show)
+            print(f"Plot saved to: {grid_path}")
+            if len(case18_grids) == 1:
+                plot_case18_2d(results, plot_path, test_case,
+                               grid_label=f"{nx}x{nx}", show=not args.no_show)
+        if len(case18_grids) > 1:
+            conv_path = args.output_dir / "test10_grid_convergence.png"
+            plot_case18_convergence(case18_grids, conv_path,
+                                    show=not args.no_show)
+            print(f"Plot saved to: {conv_path}")
+    elif test_case in (7, 8, 9):
+        plot_riemann_2d(results_by_time[0][1], plot_path, test_case, show=not args.no_show)
+    elif len(results_by_time) > 1:
         plot_time_grid(results_by_time, plot_path, test_case, sweep_labels, show=not args.no_show)
     else:
         plot_results_2d(results_by_time[0][1], plot_path, test_case, show=not args.no_show)

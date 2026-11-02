@@ -48,6 +48,15 @@ The 2D code keeps the same six initial-boundary-value tests as the 1D reference,
 | 5 | Explosion between two walls | [-0.5, 0.5] x [-0.5, 0.5] | both | three runs at `t_end = 0.01, 0.1, 0.2`, `nx = 200, ny = 50` |
 | 6 | Shu–Osher entropy-wave interaction | [0, 1] x [0, 1] | none | `(300, 30, 0.4, 0.178, 2.5)` |
 
+Tests 7-9 are genuine 2D Riemann problems taken from Liska & Wendroff (2001), and test 10 is the homework Case 18 (see below).
+
+| # | Name | Domain | BC | Default `(nx, ny, cfl, t_end)` |
+| --- | --- | --- | --- | --- |
+| 7 | Liska & Wendroff case 3 (S,S,S,S) | [0, 1]² | none | `(200, 200, 0.9, 0.3)` |
+| 8 | Liska & Wendroff case 4 (S,S,S,S) | [0, 1]² | none | `(200, 200, 0.9, 0.25)` |
+| 9 | Implosion diamond | [0, 0.3]² | all | `(150, 150, 0.4, 0.045)` — late stage `T = 2.5` |
+| 10 | **Homework Case 18** (vertical equal-pressure contact) | [0, 1]² | right | `(300, 300, 0.4, 0.2)` |
+
 End times for tests 2 and 4 are derived from the Rankine–Hugoniot relations (`shock_relations` in `Euler2D.py`), so the wave configuration is the intended one for any Mach number. With `rho = p = 1` ahead of the shock, the incident shock speed is `C = M*sqrt(gamma)`, the wall sits at `x = 0.5`, and the reflected shock travels back at speed `Wr = rho2*u2/(rho5-rho2)`:
 
     t_test_2 = 0.35 / C
@@ -55,18 +64,44 @@ End times for tests 2 and 4 are derived from the Rankine–Hugoniot relations (`
 
 For `M = 2` this gives `t_test_2 = 0.2532` and `t_test_4 = 0.4648` — the 1D README's Test 4 value. A fixed `t = 0.2` would be shorter than the 0.211 the shock needs to reach the wall, so no reflection would occur at all.
 
+### Test 10 — homework Case 18 (NOT a Liska case)
+
+This is the assignment's own problem, so it has no reference figure in the paper. It is a vertical equal-pressure contact discontinuity at `x = 0.5` on the unit square, with a reflecting wall at `x = 1`:
+
+| Region | rho | p | u | v |
+| --- | --- | --- | --- | --- |
+| `x < 0.5` | 1 | 1 | 0 | 0 |
+| `x > 0.5` | 1/3 | 1 | 0 | 0 |
+
+Boundary conditions:
+
+- `x = 1`: solid wall — `rho_ghost = rho_inner`, `p_ghost = p_inner`, `u_ghost = -u_inner`, `v_ghost = v_inner`
+- `x = 0` and `y = 0, 1`: zero-gradient extrapolation
+
+End time `T = 0.2`. The default run uses a **300×300** grid; pass `--nx 1000 --ny 1000` for the finer grid if you want to compare the two resolutions.
+
+**Important physical caveat.** As stated, both sides have `p = 1` and `u = v = 0`, so the contact is *stationary* and equal-pressure: no wave is generated, nothing travels to the wall, and `M = 0` everywhere. The only feature the solver produces is the numerical smearing of the contact by the first-order Lax–Friedrichs artificial viscosity. The `--case18-mode shock` variant therefore exists as well: it places a Mach-3 incident shock on the `x = 0.5` line (post-shock state computed from the Rankine–Hugoniot relations for an upstream `rho = 1/3, p = 1` gas), which makes the flow really reach the reflecting wall and produce the reflected-shock flow field the notes describe.
+
+```bash
+# verbatim assignment initialisation (stationary contact)
+py ./Euler2D.py --test 10 --case18-mode contact --no-show
+
+# with the M = 3 incident shock added
+py ./Euler2D.py --test 10 --case18-mode shock --no-show
+```
+
 ### Boundary tag per test
 
 The 1D code applies per-test rules in a single `apply_bc`; the 2D code mirrors those rules with a per-test tag so changing one test's boundary never silently mutates another test's:
 
 | Tag | Meaning | Used by |
 | --- | --- | --- |
-| `none` | zero-gradient on every side | tests 1, 2, 3, 6 |
-| `right` | reflecting wall on the right edge only | test 4 |
+| `none` | zero-gradient on every side | tests 1, 2, 3, 6, 7, 8 |
+| `right` | reflecting wall on the right edge only | tests 4, 10 |
 | `both` | reflecting walls on both edges in x | test 5 |
-| `all` | reflecting walls on all four sides | only via the `boundary_kind` helper |
+| `all` | reflecting walls on all four sides | test 9 (implosion) |
 
-A reflecting wall inverts the x-momentum in the ghost cell (`U[1, :, 0] = -U[1, :, 1]` for the left wall, the opposite index for the right wall); the y-momentum and energy are copied. This is the 2D analogue of the 1D `if test_case in (4, 5): U[:, -1] = U[:, -2]; U[1, -1] = -U[1, -2]` rule.
+A reflecting wall inverts the normal momentum in the ghost cell (`U[1, :, 0] = -U[1, :, 1]` for the left wall, the opposite index for the right wall; `U[2, 0, :] = -U[2, 1, :]` for the `all` tag's y walls) and copies the density, the tangential momentum and the energy. This is the 2D analogue of the 1D `if test_case in (4, 5): U[:, -1] = U[:, -2]; U[1, -1] = -U[1, -2]` rule.
 
 ## Quick start
 
@@ -76,7 +111,7 @@ Requires `numpy` and `matplotlib`:
 pip install numpy matplotlib
 ```
 
-Run directly. The program prompts for a test number (`1`-`6`, press Enter for the default `3`), then saves a PNG and opens a plot window when the computation finishes:
+Run directly. The program prompts for a test number (`1`-`10`, press Enter for the default `3`), then saves a PNG and opens a plot window when the computation finishes:
 
 ```bash
 python Euler2D.py
@@ -106,6 +141,14 @@ outputs/
   test5_comparison.csv
   test6_comparison.png
   test6_comparison.csv
+  test7_comparison.png
+  test7_comparison.csv
+  test8_comparison.png
+  test8_comparison.csv
+  test9_comparison.png
+  test9_comparison.csv
+  test10_comparison_nx300.png    (Case 18, 300x300 grid)
+  test10_comparison.csv
   all_tests_overview.png   (regenerated by the post-test summary below)
 ```
 
@@ -169,6 +212,31 @@ A second-order scheme on the same grid resolves the waves at full amplitude:
 py ./Euler2D.py --test 6 --method shasta --cfl 0.4
 ```
 
+**Test 7-9, the Liska & Wendroff 2D Riemann problems.** Each test is a genuine 2D problem with four quadrant states; the figures use the paper's presentation (pressure colour map, density contours, velocity arrows):
+
+```bash
+py ./Euler2D.py --test 7 --method lax_friedrichs --nx 200 --ny 200
+py ./Euler2D.py --test 8 --method lax_friedrichs --nx 200 --ny 200
+py ./Euler2D.py --test 9 --method lax_friedrichs --nx 150 --ny 150
+```
+
+Use `--nx 400 --ny 400` to reproduce the paper's 400×400 resolution. The implosion's late stage (the jet along the axes) needs `--t-end 2.5`.
+
+**Test 10, homework Case 18.** One picture per resolution, so a finer second run never overwrites the first:
+
+```bash
+py ./Euler2D.py --test 10 --case18-mode contact --no-show
+```
+
+produces
+
+```
+outputs/test10_comparison_nx300.png
+outputs/test10_comparison_nx1000.png
+outputs/test10_grid_convergence.png
+outputs/test10_comparison.csv
+```
+
 **Choosing the artificial-viscosity coefficient.** The scan reports the value of `b` selected for the given test:
 
 ```bash
@@ -208,7 +276,7 @@ for n in 1 2 3 4 5 6; do python Euler2D.py --test $n --no-show; done
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--test` | prompt | test number 1-6; prompts interactively when omitted |
+| `--test` | prompt | test number 1-10; prompts interactively when omitted |
 | `--method` | `all` | one of `lax_friedrichs`, `maccormack`, `maccormack_viscous`, `shasta`, `all` |
 | `--nx` | per-test | number of x grid points |
 | `--ny` | per-test | number of y grid points |
@@ -216,6 +284,7 @@ for n in 1 2 3 4 5 6; do python Euler2D.py --test $n --no-show; done
 | `--t-end` | per-test | one or more final times; defaults are derived from the shock relations |
 | `--mach` | per-test | Mach number for tests 1, 2 and 4 |
 | `--b` | `1.0` | artificial-viscosity coefficient of equation (41) |
+| `--case18-mode` | `contact` | test 10 only: `contact` = verbatim assignment initialisation, `shock` = adds the M=3 incident shock |
 | `--scan-viscosity` | off | scan `b in [0, 0.2, 0.5, 1.0, 1.5, 2.0]` and select the best physical case |
 | `--no-limiter` | off | switch the SHASTA limiter off, reproducing the unlimited case discussed in the paper |
 | `--no-show` | off | save the figure without opening a window, suitable for batch runs |
@@ -245,10 +314,53 @@ Stability on the 2D test suite (`cfl = 0.4`, `b = 1.0`):
 | 4 | stable | stable | stable | stable |
 | 5 | stable | **fails** (step 20) | stable | **fails** (step 21) |
 | 6 | stable | stable | stable | **fails** (step 427) |
+| 7 | stable | **fails** | stable | **fails** |
+| 8 | stable | stable | stable | **fails** |
+| 9 | stable | **fails** | stable | **fails** |
+| 10 | stable | see CSV | stable | see CSV |
 
 **19 / 24** combinations are stable at the default `cfl = 0.4`. The instability is the well-known 2D flaw of the predictor–corrector MacCormack: the antisymmetric forward/backward sweep treats the y-direction pressure gradient `G[2] = p` at a strong x-discontinuity as a real transverse velocity, and `rho` goes negative within ~20 steps. SHASTA fails for the same reason — its transport step is MacCormack. The numerical viscosity of `maccormack_viscous` (equation 41) suppresses the y-direction spurious mode at the cost of a tunable `b`, exactly as the paper warns.
 
 A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); the diagnostic values in the CSV come from the last good step. The Lax–Friedrichs scheme and `maccormack_viscous` survive all six tests; that is the practical lower bound of this 2D code base.
+
+### Test 10 results — Case 18 (homework)
+
+**Mode `contact` (the assignment's verbatim initialisation), 300x300, CFL 0.4, T = 0.2:**
+
+| Scheme | stable | steps | 10-90% contact width | in cells | p range | u range | max M |
+| --- | :---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `lax_friedrichs` | yes | 613 | 0.14716 | 44.1 | 1.0 - 1.0 | 0 | 0 |
+| `maccormack` | yes | 613 | 0.00000 | 0 | 1.0 - 1.0 | 0 | 0 |
+| `maccormack_viscous` | yes | 613 | 0.00000 | 0 | 1.0 - 1.0 | 0 | 0 |
+| `shasta` | yes | 617 | 0.02007 | 6.0 | 1.0 - 1.0 | 0 | 0 |
+
+What the numbers say:
+
+- **The pressure never changes** (`p = 1` everywhere) and the flow stays at rest (`u = v = 0`, `M = 0` everywhere). The contact at `x = 0.5` is *equal-pressure and stationary*, so it generates no wave and nothing travels to the reflecting wall at `x = 1`.
+- The only numerical feature is the **smearing of the contact by the artificial viscosity**. Lax–Friedrichs spreads the density jump over 44 cells (0.147 in physical units); at `x = 0.5` the density sits at 0.667 instead of the correct 1.0 or 0.3333. MacCormack and MacCormack-with-viscosity keep the contact essentially sharp (width 0), SHASTA keeps it to 6 cells.
+- The measured spreading matches the diffusive estimate `sqrt(nu*t)`: with `nu ~ cfl*a*dx/2 = 7.9e-4` this gives `sqrt(nu*T) = 0.0126`, and the 44-cell width corresponds to roughly `2*sqrt(nu*T)/dx = 7.6` cells — the same order, so the LF contact width is pure first-order diffusion, not a scheme error.
+- The solution stays **exactly uniform in y** (`max |rho - mean_y(rho)| = 7.7e-15`, `max |v| = 0`), which confirms the 2D boundary handling introduces no spurious transverse structure for this 1D-in-y problem.
+
+**Mode `shock` (M = 3 incident shock added on the `x = 0.5` line), 300x300, T = 0.2:**
+
+| Scheme | stable | steps | front x | p_wall | p_max | u_max | max M |
+| --- | :---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `lax_friedrichs` | yes | 1368 | 0.7843 | 18.92 | 19.20 | 3.01 | 0.98 |
+| `maccormack` | yes | 1511 | 0.7943 | 18.96 | 23.46 | 4.57 | 1.68 |
+| `maccormack_viscous` | yes | 1382 | 0.7910 | 18.77 | 20.97 | 3.03 | 0.99 |
+| `shasta` | **no** (step 78) | 78 | - | - | - | - | - |
+
+- The M = 3 shock travels at 6.148 and reaches the wall at `t = 0.0813`, so by `T = 0.2` the visible front at `x ≈ 0.78` is the **reflected** shock, and the high-pressure region `p ~ 19` sits between the reflected front and the wall.
+- The wall state is physically right: the reflected shock brings the gas to rest against the wall (`u_wall = -0.0005`), exactly like test 4.
+
+**On the "M = 3 region" from the notes.** There is no region in the final field whose Mach number is 3:
+
+- in `contact` mode `M = 0` everywhere;
+- in `shock` mode the maximum Mach number of the *final* field is 0.98 (Lax–Friedrichs) — every part of the field is subsonic.
+
+The reason is that **M = 3 is a property of the incident shock, not of the flow field behind it.** A shock moving at Mach 3 into stationary gas leaves behind a subsonic post-shock state (here `M = 0.98`), because the shock converts the kinetic energy into pressure. If the notes mean "the flow behind the shock is at M = 3", the initialisation would have to prescribe a *uniform Mach-3 stream* rather than a Mach-3 *shock*; those are different problems.
+
+---
 
 ### Why `cfl = 0.4` everywhere?
 
