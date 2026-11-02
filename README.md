@@ -78,7 +78,7 @@ Boundary conditions:
 - `x = 1`: solid wall — `rho_ghost = rho_inner`, `p_ghost = p_inner`, `u_ghost = -u_inner`, `v_ghost = v_inner`
 - `x = 0` and `y = 0, 1`: zero-gradient extrapolation
 
-End time `T = 0.2`. The default run uses a **300×300** grid; pass `--nx 1000 --ny 1000` for the finer grid if you want to compare the two resolutions.
+End time `T = 0.2`. The default run uses a **300×300** grid; use `--case18-nx 300 1000` to run the two resolutions and produce the grid-convergence comparison.
 
 **Important physical caveat.** As stated, both sides have `p = 1` and `u = v = 0`, so the contact is *stationary* and equal-pressure: no wave is generated, nothing travels to the wall, and `M = 0` everywhere. The only feature the solver produces is the numerical smearing of the contact by the first-order Lax–Friedrichs artificial viscosity. The `--case18-mode shock` variant therefore exists as well: it places a Mach-3 incident shock on the `x = 0.5` line (post-shock state computed from the Rankine–Hugoniot relations for an upstream `rho = 1/3, p = 1` gas), which makes the flow really reach the reflecting wall and produce the reflected-shock flow field the notes describe.
 

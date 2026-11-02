@@ -251,7 +251,8 @@ def default_runs(test_case: int) -> list[tuple[int, int, float, float, float]]:
         return [(nx, nx, cfl, default_end_time(test_case, 2.0), 2.0)]
     if test_case == 10:
         # Homework Case 18.  A single 300x300 grid is enough for the
-        # assignment's figure; pass --nx 1000 --ny 1000 for the finer run.
+        # assignment's figure; use "--case18-nx 300 1000" to bring the
+        # grid-convergence study back and write test10_grid_convergence.png.
         return [(300, 300, cfl, default_end_time(test_case, 2.0), 3.0)]
     # Test 6's x interval [0,1] is small, so we keep ny modest (≈ nx/10) to
     # fit the 2D array in memory on a typical laptop.
