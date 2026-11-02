@@ -1231,7 +1231,24 @@ def plot_case18_2d(results: list[SimulationResult], output: Path, test_case: int
         speed_of_sound = np.sqrt(GAMMA * p / np.maximum(rho, EPS))
         mach = np.abs(u) / np.maximum(speed_of_sound, EPS)
 
-        mesh = ax.pcolormesh(result.x, result.y, p, cmap="magma", shading="auto")
+        # ---- pressure cloud map -------------------------------------------
+        # A uniform field (min == max) is a special case for matplotlib: the
+        # automatic normalisation pads the colour scale by +-10% and the
+        # colorbar would claim a range like 0.9 - 1.1 for a field that is
+        # exactly constant.  Pin a narrow symmetric window around the
+        # constant value so the picture cannot be misread.
+        p_lo = float(np.min(p))
+        p_hi = float(np.max(p))
+        p_span = p_hi - p_lo
+        uniform_pressure = p_span < 1.0e-12
+        if uniform_pressure:
+            cbar_vmin = p_lo - 0.05
+            cbar_vmax = p_hi + 0.05
+        else:
+            cbar_vmin = p_lo
+            cbar_vmax = p_hi
+        mesh = ax.pcolormesh(result.x, result.y, p, cmap="magma", shading="auto",
+                              vmin=cbar_vmin, vmax=cbar_vmax)
         fig.colorbar(mesh, ax=ax, shrink=0.85, label="pressure")
 
         # Pressure isolines with the required spacing dP = 0.1.  The levels are
@@ -1240,8 +1257,6 @@ def plot_case18_2d(results: list[SimulationResult], output: Path, test_case: int
         # the shock-driven variant (p from ~5 up to ~19 near the wall).
         # The step is kept at exactly 0.1 as the assignment requires, so the
         # lines are drawn thin and semi-transparent to stay readable.
-        p_lo = float(np.min(p))
-        p_hi = float(np.max(p))
         first = np.floor(p_lo / 0.1) * 0.1
         last = np.ceil(p_hi / 0.1) * 0.1
         levels = np.arange(first, last + 1.0e-9, 0.1)
@@ -1278,10 +1293,12 @@ def plot_case18_2d(results: list[SimulationResult], output: Path, test_case: int
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_aspect("equal")
+        if uniform_pressure:
+            p_note = f"p = {p_lo:.4g} (uniform)\nno pressure contours exist"
+        else:
+            p_note = f"p in [{p_lo:.4g}, {p_hi:.4g}]\n{levels.size} pressure contours (dP = {dp:g})"
         ax.text(0.02, 0.98,
-                f"grid {grid_label}\np in [{p_lo:.4g}, {p_hi:.4g}]\n"
-                f"{levels.size} pressure contours (dP = {dp:g})\n"
-                f"max|M| = {float(np.max(mach)):.3f}",
+                f"grid {grid_label}\n{p_note}\nmax|M| = {float(np.max(mach)):.3f}",
                 transform=ax.transAxes, fontsize=8, va="top",
                 bbox=dict(boxstyle="round", facecolor="black", alpha=0.6,
                           edgecolor="none"), color="white")
@@ -1442,7 +1459,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--test", type=int, default=None, choices=range(1, 11),
         help="Test number: 1-6 original coursework, 7-10 Liska & Wendroff 2D Riemann "
-             "problems (7=case 3, 8=case 4, 9=implosion, 10=case 17 aka case 18). "
+             "problems (7=case 3, 8=case 4, 9=implosion, 10=homework Case 18). "
              "Prompts interactively when omitted.",
     )
     parser.add_argument("--method", choices=[*METHODS, "all"], default="all")
@@ -1471,6 +1488,12 @@ def parse_args() -> argparse.Namespace:
         help="Test 10 (homework Case 18) initialisation: 'contact' is the verbatim "
              "assignment statement (two equal-pressure states at rest), 'shock' adds "
              "the M=3 incident shock so the flow reaches the reflecting wall at x=1.",
+    )
+    parser.add_argument(
+        "--case18-nx", type=int, nargs="+", default=None,
+        help="Test 10 only: run several square grids (e.g. --case18-nx 300 1000) and "
+             "additionally write outputs/test10_grid_convergence.png comparing the "
+             "x-profiles.  The default is a single 300x300 grid.",
     )
     parser.add_argument(
         "--scan-viscosity", action="store_true",
@@ -1537,7 +1560,18 @@ def main() -> None:
         for key in ("nx", "ny", "cfl", "t_end", "mach")
     )
 
-    if user_picked_params:
+    # Test 10 (homework Case 18) has its own multi-grid switch.  The default is
+    # a single 300x300 grid, but "--case18-nx 300 1000" re-enables the grid
+    # convergence study of the assignment on request.
+    if test_case == 10 and args.case18_nx:
+        base_cfl = args.cfl if args.cfl is not None else default_cfl(test_case)
+        base_t_end = args.t_end[0] if args.t_end else default_end_time(test_case, 3.0)
+        base_mach = args.mach if args.mach is not None else 3.0
+        run_specs = [
+            (int(n), int(n), base_cfl, base_t_end, base_mach)
+            for n in args.case18_nx
+        ]
+    elif user_picked_params:
         nx = args.nx if args.nx is not None else default_nx(test_case)
         ny = args.ny if args.ny is not None else max(50, nx // 4)
         cfl = args.cfl if args.cfl is not None else default_cfl(test_case)

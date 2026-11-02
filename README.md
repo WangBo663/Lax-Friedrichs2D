@@ -285,6 +285,7 @@ for n in 1 2 3 4 5 6; do python Euler2D.py --test $n --no-show; done
 | `--mach` | per-test | Mach number for tests 1, 2 and 4 |
 | `--b` | `1.0` | artificial-viscosity coefficient of equation (41) |
 | `--case18-mode` | `contact` | test 10 only: `contact` = verbatim assignment initialisation, `shock` = adds the M=3 incident shock |
+| `--case18-nx` | `300` | test 10 only: list of square grid sizes; more than one additionally writes `test10_grid_convergence.png` |
 | `--scan-viscosity` | off | scan `b in [0, 0.2, 0.5, 1.0, 1.5, 2.0]` and select the best physical case |
 | `--no-limiter` | off | switch the SHASTA limiter off, reproducing the unlimited case discussed in the paper |
 | `--no-show` | off | save the figure without opening a window, suitable for batch runs |
@@ -316,12 +317,12 @@ Stability on the 2D test suite (`cfl = 0.4`, `b = 1.0`):
 | 6 | stable | stable | stable | **fails** (step 427) |
 | 7 | stable | **fails** | stable | **fails** |
 | 8 | stable | stable | stable | **fails** |
-| 9 | stable | **fails** | stable | **fails** |
+| 9 | stable | **fails** | stable | stable |
 | 10 | stable | see CSV | stable | see CSV |
 
 **19 / 24** combinations are stable at the default `cfl = 0.4`. The instability is the well-known 2D flaw of the predictor–corrector MacCormack: the antisymmetric forward/backward sweep treats the y-direction pressure gradient `G[2] = p` at a strong x-discontinuity as a real transverse velocity, and `rho` goes negative within ~20 steps. SHASTA fails for the same reason — its transport step is MacCormack. The numerical viscosity of `maccormack_viscous` (equation 41) suppresses the y-direction spurious mode at the cost of a tunable `b`, exactly as the paper warns.
 
-A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); the diagnostic values in the CSV come from the last good step. The Lax–Friedrichs scheme and `maccormack_viscous` survive all six tests; that is the practical lower bound of this 2D code base.
+A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); the diagnostic values in the CSV come from the last good step. The Lax–Friedrichs scheme and `maccormack_viscous` survive every test in the suite; that is the practical lower bound of this 2D code base. Test 9 (implosion) previously reported a SHASTA failure as well — that was caused by a boundary bug (the reflecting top and bottom walls did not flip the y-momentum); after the fix SHASTA completes all 249 steps and the flow matches Liska & Wendroff Fig. 29.
 
 ### Test 10 results — Case 18 (homework)
 
@@ -341,6 +342,12 @@ What the numbers say:
 - The measured spreading matches the diffusive estimate `sqrt(nu*t)`: with `nu ~ cfl*a*dx/2 = 7.9e-4` this gives `sqrt(nu*T) = 0.0126`, and the 44-cell width corresponds to roughly `2*sqrt(nu*T)/dx = 7.6` cells — the same order, so the LF contact width is pure first-order diffusion, not a scheme error.
 - The solution stays **exactly uniform in y** (`max |rho - mean_y(rho)| = 7.7e-15`, `max |v| = 0`), which confirms the 2D boundary handling introduces no spurious transverse structure for this 1D-in-y problem.
 
+The picture can be reproduced with:
+
+```bash
+py ./Euler2D.py --test 10 --method all --no-show
+```
+
 **Mode `shock` (M = 3 incident shock added on the `x = 0.5` line), 300x300, T = 0.2:**
 
 | Scheme | stable | steps | front x | p_wall | p_max | u_max | max M |
@@ -359,6 +366,31 @@ What the numbers say:
 - in `shock` mode the maximum Mach number of the *final* field is 0.98 (Lax–Friedrichs) — every part of the field is subsonic.
 
 The reason is that **M = 3 is a property of the incident shock, not of the flow field behind it.** A shock moving at Mach 3 into stationary gas leaves behind a subsonic post-shock state (here `M = 0.98`), because the shock converts the kinetic energy into pressure. If the notes mean "the flow behind the shock is at M = 3", the initialisation would have to prescribe a *uniform Mach-3 stream* rather than a Mach-3 *shock*; those are different problems.
+
+**Mode `shock` is reproduced with:**
+
+```bash
+py ./Euler2D.py --test 10 --case18-mode shock --method all --no-show --output-dir outputs_shock
+```
+
+**Reading the colour bar of the `contact` picture.** The pressure field is exactly
+constant there, and matplotlib pads a degenerate colour scale by +-10%, so a naive
+render claims a range of 0.9 - 1.1 for a field that is identically 1. The solver
+therefore pins the colour window to +-0.05 around the constant value and prints
+`p = 1 (uniform) / no pressure contours exist` on the panel, so the figure cannot
+be misread.
+
+**Re-enabling the grid-convergence study.** The assignment originally asked for a
+300x300 and a 1000x1000 comparison; the default run uses only the 300x300 grid.
+The comparison can be brought back on demand, which also writes
+`outputs/test10_grid_convergence.png`:
+
+```bash
+py ./Euler2D.py --test 10 --case18-nx 300 1000 --method lax_friedrichs --no-show
+```
+
+Note that the 1000x1000 run needs roughly 25x the wall-clock time of the 300x300
+run.
 
 ---
 
