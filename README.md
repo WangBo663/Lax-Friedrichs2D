@@ -305,7 +305,7 @@ The diagnostics reproduce the theoretical values. For test 4 at `M = 2` the theo
 
 For test 1 at `M = 0.4` the post-shock Mach number is `0.5774`; `maccormack` and `shasta` give `0.5774`, while `lax_friedrichs` gives `0.5737`, reflecting its stronger dissipation.
 
-Stability on the 2D test suite (`cfl = 0.4`, `b = 1.0`):
+Stability on the 2D test suite (per-test default CFL: `0.4` for tests 1-6, 9, 10; `0.9` for tests 7 and 8; `b = 1.0`):
 
 | Test | LF | MC | MC_visc | SHASTA |
 | --- | :---: | :---: | :---: | :---: |
@@ -315,16 +315,16 @@ Stability on the 2D test suite (`cfl = 0.4`, `b = 1.0`):
 | 4 | stable | stable | stable | stable |
 | 5 | stable | **fails** (step 20) | stable | stable |
 | 6 | stable | stable | stable | stable |
-| 7 | stable | **fails** | stable | **fails** (step 18, CFL 0.9) |
+| 7 | stable | **fails** (step 50) | stable | **fails** (step 18, CFL 0.9) |
 | 8 | stable | stable | stable | stable |
-| 9 | stable | **fails** | stable | stable |
+| 9 | stable | **fails** (step 6) | stable | stable |
 | 10 | stable | stable | stable | stable |
 
-**22 / 24** combinations are stable at the default `cfl = 0.4`. The remaining instabilities are the well-known 2D flaw of the predictor–corrector MacCormack: the antisymmetric forward/backward sweep treats the y-direction pressure gradient `G[2] = p` at a strong x-discontinuity as a real transverse velocity, and `rho` goes negative within ~20 steps. The numerical viscosity of `maccormack_viscous` (equation 41) suppresses the y-direction spurious mode at the cost of a tunable `b`, exactly as the paper warns.
+**35 / 40** combinations are stable at the default `cfl = 0.4` (10 tests x 4 schemes; test 5 counts once per end time). The remaining instabilities are the well-known 2D flaw of the predictor–corrector MacCormack: the antisymmetric forward/backward sweep treats the y-direction pressure gradient `G[2] = p` at a strong x-discontinuity as a real transverse velocity, and `rho` goes negative within ~20 steps. The numerical viscosity of `maccormack_viscous` (equation 41) suppresses the y-direction spurious mode at the cost of a tunable `b`, exactly as the paper warns.
 
 SHASTA survives every test except test 7, because the FCT limiter controls the spurious transverse mode. Test 7 (Liska case 3) is a genuine two-dimensional Riemann problem with four interacting quarter-waves; it fails at step 18 with its default `cfl = 0.9` and still fails at step 47 with `cfl = 0.4`. This is the expected outcome: the case has no exact solution and its reference picture is a density contour plot that requires the full 400x400 grid and the viscosity of `maccormack_viscous` to be reproduced. The SHASTA panel of test 7 therefore shows the last physical state before the run was stopped by the `is_physical` check.
 
-A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); the diagnostic values in the CSV come from the last good step. The Lax–Friedrichs scheme and `maccormack_viscous` survive every test in the suite; that is the practical lower bound of this 2D code base. Test 9 (implosion) previously reported a SHASTA failure as well — that was caused by a boundary bug (the reflecting top and bottom walls did not flip the y-momentum); after the fix SHASTA completes all 249 steps and the flow matches Liska & Wendroff Fig. 29.
+A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); the diagnostic values in the CSV come from the last good step. The Lax–Friedrichs scheme and `maccormack_viscous` survive every test in the suite; that is the practical lower bound of this 2D code base. Test 9 (implosion) previously reported a SHASTA failure as well — that was caused by a boundary bug (the reflecting top and bottom walls did not flip the y-momentum); after the fix SHASTA completes all 252 steps and the flow matches Liska & Wendroff Fig. 29.
 
 ### Test 10 results — Case 18 (homework)
 
