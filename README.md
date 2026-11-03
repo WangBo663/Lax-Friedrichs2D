@@ -1,6 +1,6 @@
 # 2D Euler Equations Numerical Solver
 
-A two-dimensional finite-difference solver for the inviscid Euler equations, built directly on top of the [1D Lax-Friedrichs repository](https://github.com/WangBo663/Lax-Friedrichs). The same six initial/boundary-value tests are kept so every scheme can be compared head-to-head against the 1D reference, and a one-cell ghost layer extends each scheme to a rectangular 2D domain without rewriting the time-marching loop.
+A two-dimensional finite-difference solver for the inviscid Euler equations, built directly on top of the [1D Lax-Friedrichs repository](https://github.com/WangBo663/Lax-Friedrichs). The same six initial/boundary-value tests as the 1D reference are kept so every scheme can be compared head-to-head against it, plus four 2D problems (three Liska & Wendroff Riemann cases and the homework Case 18). A one-cell ghost layer extends each scheme to a rectangular 2D domain without rewriting the time-marching loop.
 
 Four numerical schemes are implemented in one file (`Euler2D.py`):
 
@@ -37,7 +37,7 @@ with `b` a dimensionless constant of order unity.
 
 ## Test cases
 
-The 2D code keeps the same six initial-boundary-value tests as the 1D reference, so switching `--test N` reproduces the 1D plot in 2D. Every test has its own default grid, CFL and end time.
+The 2D code keeps the same six initial-boundary-value tests as the 1D reference — so switching `--test N` reproduces the 1D plot in 2D — and adds four 2D problems (tests 7-10). Every test has its own default grid, CFL and end time.
 
 | # | Name | Domain | BC | Default `(nx, ny, cfl, t_end, mach)` |
 | --- | --- | --- | --- | --- |
@@ -249,7 +249,7 @@ py ./Euler2D.py --test 3 --method maccormack_viscous --nx 300 --cfl 0.4 --scan-v
 py ./Euler2D.py --test 3 --method shasta --nx 300 --cfl 0.4 --no-limiter
 ```
 
-**Regenerating the six-test summary figure.** After running tests 1 through 6 individually with `--no-show`, the post-processing step in `Euler2D.py --summary` writes `outputs/all_tests_overview.png`, a 3x2 grid of `rho(x)`, `u(x)`, `p(x)` snapshots with the per-test parameters annotated:
+**Regenerating the six-test summary figure.** After running tests 1 through 6 individually with `--no-show`, the post-processing step in `Euler2D.py --summary` writes `outputs/all_tests_overview.png`, a 3x2 grid of `rho(x)`, `u(x)`, `p(x)` snapshots with the per-test parameters annotated. This overview covers the six 1D-derived tests only — tests 7-10 are genuine 2D problems and have their own per-test figures in `outputs/`:
 
 ```bash
 py ./Euler2D.py --test 1 --no-show
@@ -419,13 +419,21 @@ The 1D reference uses `cfl = 0.9` for tests 1, 2, 3, 5 and `cfl = 0.4` only for 
 ├── Euler2D.py              # the only solver file (≈ 1812 lines)
 ├── .gitignore
 ├── README.md               # this file
-└── outputs/                # CSV + PNG for each test, committed
-    ├── test1_comparison.png
-    ├── test1_comparison.csv
-    ├── ...
-    ├── test6_comparison.png
-    ├── test6_comparison.csv
-    └── all_tests_overview.png
+├── 代码导览.md              # Chinese code walkthrough
+├── outputs/                # CSV + PNG for each test, committed
+│   ├── test1_comparison.png
+│   ├── test1_comparison.csv
+│   ├── ...
+│   ├── test9_comparison.png
+│   ├── test9_comparison.csv
+│   ├── test10_comparison.png
+│   ├── test10_comparison.csv
+│   ├── test10_comparison_nx300.png
+│   └── all_tests_overview.png
+└── outputs_shock/          # Case 18 in --case18-mode shock
+    ├── test10_comparison.png
+    ├── test10_comparison.csv
+    └── test10_comparison_nx300.png
 ```
 
 The repository is intentionally a single-file solver to keep the diff with the 1D reference as small as possible: every function name, flag name and `default_*` constant is reused from `Lax-Friedrichs.py`, the only new layer is the 1-cell ghost in `apply_ghost_bc` and the `flux_x` / `flux_y` split.
