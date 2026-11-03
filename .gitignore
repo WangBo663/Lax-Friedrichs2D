@@ -33,3 +33,5 @@ _diag_*.py
 _try_*.py
 _memcheck.py
 _verify_*.py
+_mc_*.py
+_mc_*_out.txt

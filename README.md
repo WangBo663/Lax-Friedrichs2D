@@ -176,7 +176,7 @@ py ./Euler2D.py --test 2 --method all --nx 300 --cfl 0.4
 py ./Euler2D.py --test 3 --method shasta
 ```
 
-Comparing all four schemes shows that the bare MacCormack fails here, exactly as in 1D:
+Comparing all four schemes shows that the bare MacCormack fails here — the pressure goes negative at step 12, while the other three survive:
 
 ```bash
 py ./Euler2D.py --test 3 --method all --nx 300 --cfl 0.4 --b 1.0
@@ -280,7 +280,7 @@ for n in 1 2 3 4 5 6; do python Euler2D.py --test $n --no-show; done
 | `--method` | `all` | one of `lax_friedrichs`, `maccormack`, `maccormack_viscous`, `shasta`, `all` |
 | `--nx` | per-test | number of x grid points |
 | `--ny` | per-test | number of y grid points |
-| `--cfl` | `0.4` | CFL number; 2D MacCormack transport needs a smaller step than the 1D convective limit |
+| `--cfl` | `0.4` | CFL number; the 2D bare MacCormack needs a smaller step than the 1D convective limit (it still fails at 0.4, just later) |
 | `--t-end` | per-test | one or more final times; defaults are derived from the shock relations |
 | `--mach` | per-test | Mach number for tests 1, 2 and 4 |
 | `--b` | `1.0` | artificial-viscosity coefficient of equation (41) |
@@ -320,9 +320,9 @@ Stability on the 2D test suite (per-test default CFL: `0.4` for tests 1-6, 9, 10
 | 9 | stable | **fails** (step 6) | stable | stable |
 | 10 | stable | stable | stable | stable |
 
-**42 / 48** combinations are stable (10 tests x 4 schemes, with test 5 contributing three end times, so 48 runs in total; each test uses its own default CFL). Every remaining instability is the well-known 2D flaw of the predictor–corrector MacCormack: the antisymmetric forward/backward sweep treats the y-direction pressure gradient `G[2] = p` at a strong x-discontinuity as a real transverse velocity, and `rho` goes negative within ~20 steps. The numerical viscosity of `maccormack_viscous` (equation 41) suppresses the y-direction spurious mode at the cost of a tunable `b`, exactly as the paper warns.
+**42 / 48** combinations are stable (10 tests x 4 schemes, with test 5 contributing three end times, so 48 runs in total; each test uses its own default CFL). Every remaining instability is the bare `maccormack` scheme, and the four failing cases fail for **two different reasons** — see "Why the bare MacCormack fails" below for the measurements. In every failure the *pressure* goes negative first while the density stays positive; Lax–Friedrichs and `maccormack_viscous` survive every test in the suite, and SHASTA survives every test as well.
 
-**SHASTA now survives every test in the suite**, because the FCT limiter controls the spurious transverse mode. Test 7 (Liska case 3) used to fail at step 18; the cause was the lower clamp on the FCT diffusion factor, not the case itself — see "the clamp on the FCT diffusion factor" below. It now runs to completion in 281 steps.
+**SHASTA now survives every test in the suite**, because the FCT limiter restores the monotonicity that the bare MacCormack loses at a strong discontinuity. Test 7 (Liska case 3) used to fail at step 18; the cause was the lower clamp on the FCT diffusion factor, not the case itself — see "the clamp on the FCT diffusion factor" below. It now runs to completion in 281 steps.
 
 A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); the diagnostic values in the CSV come from the last good step. The Lax–Friedrichs scheme and `maccormack_viscous` survive every test in the suite; that is the practical lower bound of this 2D code base. Test 9 (implosion) previously reported a SHASTA failure as well — that was caused by a boundary bug (the reflecting top and bottom walls did not flip the y-momentum); after the fix SHASTA completes all 253 steps and the flow matches Liska & Wendroff Fig. 29.
 
@@ -410,7 +410,51 @@ run.
 
 ### Why `cfl = 0.4` in 2D?
 
-The 1D reference uses `cfl = 0.9` for tests 1, 2, 3, 5 and `cfl = 0.4` only for test 4. In 2D the same MacCormack scheme that runs at `cfl = 0.9` in 1D fails within 6-20 steps on tests 3, 5, 7 and 9, because the predictor picks up a y-velocity from the x-pressure gradient and the corrector amplifies it. The conservative `cfl = 0.4` is therefore the default for every test whose initial data contains a strong x-discontinuity (1, 2, 3, 4, 5, 6, 9, 10); the two Liska quadrant problems (7 and 8) have no such discontinuity and keep the 1D value `0.9`. The 1D value would only be safe for the `lax_friedrichs` and `maccormack_viscous` runs.
+The 1D reference uses `cfl = 0.9` for tests 1, 2, 3, 5 and `cfl = 0.4` only for test 4. In 2D the same MacCormack scheme that runs at `cfl = 0.9` in 1D fails within 6-50 steps on tests 3, 5, 7 and 9. The conservative `cfl = 0.4` is therefore the default for every test whose initial data contains a strong x-discontinuity (1, 2, 3, 4, 5, 6, 9, 10); the two Liska quadrant problems (7 and 8) have no such discontinuity and keep the 1D value `0.9`. The 1D value would only be safe for the `lax_friedrichs` and `maccormack_viscous` runs.
+
+Note that `cfl = 0.4` does **not** fix the bare MacCormack: it only postpones the failure. Sweeping the CFL number on test 3 gives a failure step of 12 at `cfl = 0.4`, 18 at 0.2, 29 at 0.1, 53 at 0.05 and 246 at 0.01 — the product `step * cfl` stays roughly constant, so the failure time scales as `1/cfl`. That is the signature of a scheme with too little dissipation, not of a coupling instability.
+
+### Why the bare MacCormack fails
+
+This section records a diagnosis that overturned an earlier, plausible-looking explanation, so the measurements are given in full.
+
+**The wrong explanation.** An earlier version of this README claimed that the 2D failure comes from the antisymmetric forward/backward sweep treating the y-direction pressure gradient `G[2] = p` at a strong x-discontinuity as a real transverse velocity, and that the artificial viscosity of `maccormack_viscous` suppresses this "spurious transverse mode". Measurements do not support that story:
+
+| Check | Result |
+| --- | --- |
+| Is `v` non-zero in test 3? | **No — `max abs(v) = 0.000e+00` over the entire run** |
+| Are the y-flux differences non-zero in test 3? | **No — `max abs(d/dy G[k]) = 0` for all four components `k`, at every step** |
+| Does test 3 still fail with `ny = 2` (essentially 1D)? | **Yes — step 12, identical to `ny = 75`** |
+| Does test 3 still fail with the y-momentum frozen (`G[2]` dropped from the update)? | **Yes — step 12, identical** |
+| Does test 5 still fail with the y-momentum frozen? | **Yes — step 20, identical** |
+| Does test 9 still fail with the y-momentum frozen? | **Yes — step 9** |
+
+Because the field of tests 3 and 5 is uniform in `y`, `G[2] = rho*v^2 + p` is never *differentiated* in `y`: the update term `lam_y * (G[2, 2:] - G[2, 1:-1])` is exactly zero. A flux term that is multiplied by exactly zero cannot produce a transverse velocity.
+
+**What actually happens.** In tests 3 and 5 the bare MacCormack is a pure one-dimensional scheme, and it breaks the *pressure* monotonicity at a strong discontinuity:
+
+| Step | `p_min` after predictor | `p_min` after corrector | `p_min` of `U_prev` |
+| ---: | ---: | ---: | ---: |
+| 1-6 | 0.100000 | 0.100000 | 0.100000 |
+| 7 | 0.100000 | **0.093128** | 0.100000 |
+| 8 | 0.086862 | 0.074778 | 0.093128 |
+| 9 | 0.058087 | 0.054211 | 0.074778 |
+| 10 | 0.027322 | 0.031942 | 0.054211 |
+| 11 | -0.005223 | 0.008476 | 0.031942 |
+| 12 | -0.040830 | **-0.015956** | 0.008476 |
+
+The predictor is still exact at step 7; the **corrector** is what breaks the bound, and from step 8 on the error has propagated into the predictor as well. The density never leaves its initial range `[0.125, 1.0]` during the whole run — only the pressure decays, monotonically, until it goes negative. Lax–Friedrichs and `maccormack_viscous` keep `p_min = 0.100000` for every one of those steps. The mechanism is the well-known one: the antisymmetric predictor–corrector pair has **no dissipation**, so the overshoot it produces at a strong discontinuity is not damped and accumulates one-sidedly.
+
+**Tests 7 and 9 are different.** They are genuinely two-dimensional, and there the y coupling does matter — but for different reasons in each case:
+
+| Case | `max abs(d/dy G[2])` | Full 2D update | With `lam_y = 0` (pure 1D) |
+| --- | ---: | --- | --- |
+| 7 (Liska case 3) | 1.30 | fails at step 50 | **stable**, 233 steps |
+| 9 (implosion) | 0.86 | fails at step 6 | **fails at step 9** |
+
+For test 7 the y coupling is *required* for the failure: with `lam_y = 0` the run completes. The generated transverse velocity is concentrated on the vertical quadrant interface (`max abs(v) = 1.22` on the `x = 1/2` line) and is much weaker on the horizontal one (0.091), and the failure is a pressure failure in a 3x3 cell patch at the centre of the square (`rows 94-96, cols 94-96`). For test 9 the x direction already breaks the scheme on its own — `lam_y = 0` still fails, only three steps later — so the y coupling accelerates an x-direction breakdown rather than causing it.
+
+**Consequence for the fix.** Artificial viscosity repairs all four cases, but only because it adds the dissipation the bare scheme lacks: `maccormack_viscous` needs `b >= 0.05` on test 3 and `b >= 0.1` on tests 5 and 9 to survive, while `b <= 0.01` fails at step 12-13. Since `b` changes the *scheme* rather than fixing a bug, the bare `maccormack` is kept in the suite as a documented reference point, and the SHASTA and Lax–Friedrichs results are what the figures show.
 
 ## Repository layout
 
