@@ -403,7 +403,7 @@ The 1D reference uses `cfl = 0.9` for tests 1, 2, 3, 5 and `cfl = 0.4` only for 
 
 ```
 .
-├── Euler2D.py              # the only solver file (≈ 1700 lines)
+├── Euler2D.py              # the only solver file (≈ 1730 lines)
 ├── .gitignore
 ├── README.md               # this file
 └── outputs/                # CSV + PNG for each test, committed
