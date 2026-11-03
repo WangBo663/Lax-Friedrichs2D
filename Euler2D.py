@@ -760,9 +760,36 @@ def shasta_step(U: np.ndarray, dx: float, dy: float, dt: float,
     """2D SHASTA / FCT: MacCormack transport + strong diffusion + limited anti-diffusion.
 
     The diffusion factor is the textbook 0.5*lambda*(1-lambda), clamped from below at
-    1/8 to keep the limiter well-conditioned when the time step is small.
+    1/12 to keep the limiter well-conditioned when the time step is small.
     The anti-diffusion uses the same factor in both x and y; this is the simplest
     2D extension of the 1D SHASTA scheme (Boris & Book, 1976, sec. 2).
+
+    **Why the clamp is 1/12 and not 1/8.**  The limiter of equation (46) bounds the
+    limited difference *relatively*: ``min(8|prev|, |cur|, 8|nxt|)``.  The absolute
+    anti-diffusion that this relative bound permits therefore scales with the
+    diffusion factor ``nu``.  A floor that is too high lets the anti-diffusion
+    push a cell outside the local range of the transported solution, which is
+    exactly the condition FCT is supposed to forbid.
+
+    Measured on test 7 (Liska case 3, where four quarter-waves meet in the
+    centre of the square) with the floor swept from 0 to 0.13:
+
+    ==============  ==================================================
+    floor           outcome
+    ==============  ==================================================
+    0 ... 0.11     stable, 279-281 steps
+    0.115           unstable at step 279
+    0.12            unstable at step 74
+    0.125 (old)     unstable at step 18
+    ==============  ==================================================
+
+    At a floor of 1/8 the anti-diffusion on the energy component is about 2.2x
+    larger than at 1/12 (4.0e-1 against 1.6e-1 on the first step), the energy
+    leaves the local range of the transport solution from step 2 onwards, and
+    the pressure at the centre of the square decays from 2.9e-2 to 7.1e-3
+    before it turns negative in step 18.  At 1/12 the monotonicity violation
+    stays at zero for the first twelve steps and test 7 runs to completion.
+    1/12 sits in the middle of the stable band, with margin on both sides.
 
     The strong diffusion is evaluated on the *ghosted* array, so that the
     boundary ring of the physical domain receives the one-sided stencil that
@@ -783,7 +810,7 @@ def shasta_step(U: np.ndarray, dx: float, dy: float, dt: float,
     transported_ghost = _add_ghost(_strip_ghost(transported))
     apply_ghost_bc(transported_ghost, test_case)
 
-    nu_diff = max(0.5 * (dt / dx) * (1.0 - dt / dx), 0.125)
+    nu_diff = max(0.5 * (dt / dx) * (1.0 - dt / dx), 1.0 / 12.0)
 
     # Ghosted Laplacians: the ghost rows and columns carry the zero-gradient
     # or the reflected values, so the boundary ring automatically uses the

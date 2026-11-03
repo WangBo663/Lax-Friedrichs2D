@@ -41,12 +41,12 @@ The 2D code keeps the same six initial-boundary-value tests as the 1D reference,
 
 | # | Name | Domain | BC | Default `(nx, ny, cfl, t_end, mach)` |
 | --- | --- | --- | --- | --- |
-| 1 | Stationary shock | [-0.5, 0.5] x [-0.5, 0.5] | none | `(300, 75, 0.4, 0.16, 0.4)` |
-| 2 | Moving shock | [-0.5, 0.5] x [-0.5, 0.5] | none | `(300, 75, 0.4, 0.35/(M*sqrt(gamma)), 1.0)` |
+| 1 | Stationary shock | [-0.5, 0.5] x [-0.5, 0.5] | none | `(300, 75, 0.4, 0.20, 2.0)` |
+| 2 | Moving shock | [-0.5, 0.5] x [-0.5, 0.5] | none | `(300, 75, 0.4, 0.35/(M*sqrt(gamma)), 2.0)` |
 | 3 | Sod shock tube | [-0.5, 0.5] x [-0.5, 0.5] | none | `(300, 75, 0.4, 0.20, --)` |
 | 4 | Mach=2 reflection from a wall | [-0.5, 0.5] x [-0.5, 0.5] | right | `(300, 75, 0.4, 0.5/C + 0.3/Wr, 2.0)` |
 | 5 | Explosion between two walls | [-0.5, 0.5] x [-0.5, 0.5] | both | three runs at `t_end = 0.01, 0.1, 0.2`, `nx = 200, ny = 50` |
-| 6 | Shu–Osher entropy-wave interaction | [0, 1] x [0, 1] | none | `(300, 30, 0.4, 0.178, 2.5)` |
+| 6 | Shu–Osher entropy-wave interaction | [0, 1] x [0, 1] | none | `(300, 30, 0.4, 0.178, --)` |
 
 Tests 7-9 are genuine 2D Riemann problems taken from Liska & Wendroff (2001), and test 10 is the homework Case 18 (see below).
 
@@ -62,7 +62,7 @@ End times for tests 2 and 4 are derived from the Rankine–Hugoniot relations (`
     t_test_2 = 0.35 / C
     t_test_4 = 0.5  / C + 0.3 / Wr
 
-For `M = 2` this gives `t_test_2 = 0.2532` and `t_test_4 = 0.4648` — the 1D README's Test 4 value. A fixed `t = 0.2` would be shorter than the 0.211 the shock needs to reach the wall, so no reflection would occur at all.
+For `M = 2` this gives `t_test_2 = 0.1479` and `t_test_4 = 0.4648` — the 1D README's Test 4 value. A fixed `t = 0.2` would be shorter than the 0.211 the shock needs to reach the wall, so no reflection would occur at all.
 
 ### Test 10 — homework Case 18 (NOT a Liska case)
 
@@ -299,11 +299,11 @@ The diagnostics reproduce the theoretical values. For test 4 at `M = 2` the theo
 | Scheme | P_w | Delta P | rho_w | u_w |
 | --- | ---: | ---: | ---: | ---: |
 | `lax_friedrichs` | 14.96 | 3.999 | 5.94 | -0.0000 |
-| `maccormack` | 15.00 | 3.991 | 6.16 | -0.0000 |
-| `maccormack_viscous` | 15.00 | 3.991 | 6.16 | -0.0000 |
-| `shasta` | 15.00 | 3.988 | 6.16 | -0.0000 |
+| `maccormack` | 15.00 | 3.999 | 6.03 | -0.0000 |
+| `maccormack_viscous` | 15.00 | 3.999 | 6.16 | -0.0000 |
+| `shasta` | 15.00 | 4.000 | 5.95 | -0.0000 |
 
-For test 1 at `M = 0.4` the post-shock Mach number is `0.5774`; `maccormack` and `shasta` give `0.5774`, while `lax_friedrichs` gives `0.5737`, reflecting its stronger dissipation.
+For test 1 at `M = 2` the post-shock Mach number is `0.5774`; `maccormack` gives `0.5774`, while `lax_friedrichs` gives `0.5737` and `maccormack_viscous` gives `0.5766`, reflecting their stronger dissipation.
 
 Stability on the 2D test suite (per-test default CFL: `0.4` for tests 1-6, 9, 10; `0.9` for tests 7 and 8; `b = 1.0`):
 
@@ -315,16 +315,16 @@ Stability on the 2D test suite (per-test default CFL: `0.4` for tests 1-6, 9, 10
 | 4 | stable | stable | stable | stable |
 | 5 | stable | **fails** (step 20) | stable | stable |
 | 6 | stable | stable | stable | stable |
-| 7 | stable | **fails** (step 50) | stable | **fails** (step 18, CFL 0.9) |
+| 7 | stable | **fails** (step 50) | stable | stable |
 | 8 | stable | stable | stable | stable |
 | 9 | stable | **fails** (step 6) | stable | stable |
 | 10 | stable | stable | stable | stable |
 
-**35 / 40** combinations are stable at the default `cfl = 0.4` (10 tests x 4 schemes; test 5 counts once per end time). The remaining instabilities are the well-known 2D flaw of the predictor–corrector MacCormack: the antisymmetric forward/backward sweep treats the y-direction pressure gradient `G[2] = p` at a strong x-discontinuity as a real transverse velocity, and `rho` goes negative within ~20 steps. The numerical viscosity of `maccormack_viscous` (equation 41) suppresses the y-direction spurious mode at the cost of a tunable `b`, exactly as the paper warns.
+**42 / 48** combinations are stable (10 tests x 4 schemes, with test 5 contributing three end times, so 48 runs in total; each test uses its own default CFL). Every remaining instability is the well-known 2D flaw of the predictor–corrector MacCormack: the antisymmetric forward/backward sweep treats the y-direction pressure gradient `G[2] = p` at a strong x-discontinuity as a real transverse velocity, and `rho` goes negative within ~20 steps. The numerical viscosity of `maccormack_viscous` (equation 41) suppresses the y-direction spurious mode at the cost of a tunable `b`, exactly as the paper warns.
 
-SHASTA survives every test except test 7, because the FCT limiter controls the spurious transverse mode. Test 7 (Liska case 3) is a genuine two-dimensional Riemann problem with four interacting quarter-waves; it fails at step 18 with its default `cfl = 0.9` and still fails at step 47 with `cfl = 0.4`. This is the expected outcome: the case has no exact solution and its reference picture is a density contour plot that requires the full 400x400 grid and the viscosity of `maccormack_viscous` to be reproduced. The SHASTA panel of test 7 therefore shows the last physical state before the run was stopped by the `is_physical` check.
+**SHASTA now survives every test in the suite**, because the FCT limiter controls the spurious transverse mode. Test 7 (Liska case 3) used to fail at step 18; the cause was the lower clamp on the FCT diffusion factor, not the case itself — see "the clamp on the FCT diffusion factor" below. It now runs to completion in 281 steps.
 
-A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); the diagnostic values in the CSV come from the last good step. The Lax–Friedrichs scheme and `maccormack_viscous` survive every test in the suite; that is the practical lower bound of this 2D code base. Test 9 (implosion) previously reported a SHASTA failure as well — that was caused by a boundary bug (the reflecting top and bottom walls did not flip the y-momentum); after the fix SHASTA completes all 252 steps and the flow matches Liska & Wendroff Fig. 29.
+A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); the diagnostic values in the CSV come from the last good step. The Lax–Friedrichs scheme and `maccormack_viscous` survive every test in the suite; that is the practical lower bound of this 2D code base. Test 9 (implosion) previously reported a SHASTA failure as well — that was caused by a boundary bug (the reflecting top and bottom walls did not flip the y-momentum); after the fix SHASTA completes all 253 steps and the flow matches Liska & Wendroff Fig. 29.
 
 ### Test 10 results — Case 18 (homework)
 
@@ -335,14 +335,24 @@ A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); 
 | `lax_friedrichs` | yes | 613 | 0.14716 | 44.1 | 1.0 - 1.0 | 0 | 0 |
 | `maccormack` | yes | 613 | 0.00000 | 0 | 1.0 - 1.0 | 0 | 0 |
 | `maccormack_viscous` | yes | 613 | 0.00000 | 0 | 1.0 - 1.0 | 0 | 0 |
-| `shasta` | yes | 613 | 0.02007 | 6.0 | 1.0 - 1.0 | 0 | 0 |
+| `shasta` | yes | 613 | 0.01338 | 4.0 | 1.0 - 1.0 | 0 | 0 |
 
 What the numbers say:
 
 - **The pressure never changes** (`p = 1` everywhere) and the flow stays at rest (`u = v = 0`, `M = 0` everywhere). The contact at `x = 0.5` is *equal-pressure and stationary*, so it generates no wave and nothing travels to the reflecting wall at `x = 1`.
-- The only numerical feature is the **smearing of the contact by the artificial viscosity**. Lax–Friedrichs spreads the density jump over 44 cells (0.147 in physical units); at `x = 0.5` the density sits at 0.667 instead of the correct 1.0 or 0.3333. MacCormack and MacCormack-with-viscosity keep the contact essentially sharp (width 0), SHASTA keeps it to 6 cells.
+- The only numerical feature is the **smearing of the contact by the artificial viscosity**. Lax–Friedrichs spreads the density jump over 44 cells (0.147 in physical units); at `x = 0.5` the density sits at 0.667 instead of the correct 1.0 or 0.3333. MacCormack and MacCormack-with-viscosity keep the contact essentially sharp (width 0), SHASTA keeps it to 4 cells.
 - **SHASTA and the boundary ring.** The strong diffusion `nu*lap` of equation (43) was originally evaluated on the *physical* array, which has no ghost values, so it only reached the inner block (rows `1..ny-2`, columns `1..nx-2`) while the boundary ring kept the raw MacCormack transport. Every test starts from a field that is uniform in `y`, so the two supports disagree as soon as the scheme meets an x-discontinuity: the interior is smoothed, the boundary ring is not, and the field stops being uniform in `y`. In Case 18 the contact runs along `x`, so the interior was smeared while the boundary ring kept it sharp, and the density contours grew a white "fur" along the top and the bottom of the SHASTA panel. The same mismatch made the y-momentum of the 1D lifts drift. The Laplacian is now taken on the ghosted array, so the boundary ring receives the one-sided stencil that matches the ghost installed by `apply_ghost_bc`, and the anti-diffusion covers the same cells as the strong diffusion. The y-defect `max |rho[row 0] - rho[row ny/2]|` drops from `0.275` to exactly `0`, and the density range tightens from `[0.32990, 1.00343]` to `[0.33333, 1.00000]`.
 - A second, smaller defect lived in the limit selector of equation (46): its three-cell sign test reads `sign(prev) == sign(cur) == sign(nxt)`, and a zero-gradient wall makes the ghost row identical to the first physical row, so the wall interface difference is exactly 0. The original code read that zero as "opposite sign", failed the test at the first interior interface and forced the limited difference to zero. A wall interface difference that is exactly zero now counts as "no sign information": it is skipped in the sign test and dropped from the magnitude constraint. The exemption is deliberately restricted to the wall interfaces — exempting every zero difference lets the limiter take a value far larger than its neighbours and destroys monotonicity (test 1 then blows up at step 545).
+- **The clamp on the FCT diffusion factor.** Equation (43) uses `nu = max(0.5*lambda*(1-lambda), 1/8)`. The clamp exists to keep the limiter well-conditioned when the time step is small, but the value matters more than it looks: the magnitude bound of equation (46) is *relative* (`min(8|prev|, |cur|, 8|nxt|)`), so the **absolute** anti-diffusion it permits scales with `nu`. A clamp that is too high lets the anti-diffusion push a cell outside the local range of the transported solution — exactly the condition FCT is meant to forbid. Sweeping the clamp on test 7 (Liska case 3, four quarter-waves meeting in the centre of the square) shows a sharp boundary:
+
+  | clamp | outcome |
+  | --- | --- |
+  | 0 ... 0.11 | stable, 279-281 steps |
+  | 0.115 | unstable at step 279 |
+  | 0.12 | unstable at step 74 |
+  | **0.125 (old)** | **unstable at step 18** |
+
+  At `1/8` the anti-diffusion on the energy component is about 2.2x larger than at `1/12` (4.0e-1 against 1.6e-1 on the first step); the energy leaves the local range of the transport solution from step 2 onwards, the pressure at the centre of the square decays from 2.9e-2 to 7.1e-3 and turns negative in step 18. At `1/12` the monotonicity violation stays at zero for the first twelve steps and test 7 runs to completion. The clamp now reads `max(0.5*lambda*(1-lambda), 1/12)`, which sits in the middle of the stable band with margin on both sides. Every other test keeps its previous result to within one percent in step count.
 - The measured spreading matches the diffusive estimate `sqrt(nu*t)`: with `nu ~ cfl*a*dx/2 = 7.9e-4` this gives `sqrt(nu*T) = 0.0126`, and the 44-cell width corresponds to roughly `2*sqrt(nu*T)/dx = 7.6` cells — the same order, so the LF contact width is pure first-order diffusion, not a scheme error.
 - The solution stays **exactly uniform in y** (`max |rho - mean_y(rho)| = 7.7e-15`, `max |v| = 0`), which confirms the 2D boundary handling introduces no spurious transverse structure for this 1D-in-y problem. The SHASTA panel needed a fix to reach that state: the strong diffusion used to be restricted to the inner block, so the boundary ring kept the raw transport and the contact was smeared in the interior but not at the wall (see the SHASTA bullet above).
 
@@ -359,10 +369,10 @@ py ./Euler2D.py --test 10 --method all --no-show
 | `lax_friedrichs` | yes | 1368 | 0.7843 | 18.92 | 19.20 | 3.01 | 0.98 |
 | `maccormack` | yes | 1511 | 0.7943 | 18.96 | 23.46 | 4.57 | 1.68 |
 | `maccormack_viscous` | yes | 1382 | 0.7910 | 18.77 | 20.97 | 3.03 | 0.99 |
-| `shasta` | yes | 1376 | 0.7910 | 18.81 | 20.25 | 3.07 | 1.00 |
+| `shasta` | yes | 1375 | 0.7910 | 18.81 | 20.18 | 3.06 | 1.00 |
 
 - The M = 3 shock travels at 6.148 and reaches the wall at `t = 0.0813`, so by `T = 0.2` the visible front at `x ≈ 0.78` is the **reflected** shock, and the high-pressure region `p ~ 19` sits between the reflected front and the wall.
-- The wall state is physically right: the reflected shock brings the gas to rest against the wall (`u_wall = -0.0005`), exactly like test 4.
+- The wall state is physically right: the reflected shock brings the gas to rest against the wall (`u_wall` between `-5.1e-4` and `+1.9e-3` across the four schemes, `3.5e-5` for SHASTA), exactly like test 4.
 
 **On the "M = 3 region" from the notes.** There is no region in the final field whose Mach number is 3:
 
@@ -398,15 +408,15 @@ run.
 
 ---
 
-### Why `cfl = 0.4` everywhere?
+### Why `cfl = 0.4` in 2D?
 
-The 1D reference uses `cfl = 0.9` for tests 1, 2, 3, 5 and `cfl = 0.4` only for test 4. In 2D the same MacCormack scheme that runs at `cfl = 0.9` in 1D fails within 12-20 steps on tests 3, 5 and 6, because the predictor picks up a y-velocity from the x-pressure gradient and the corrector amplifies it. The conservative `cfl = 0.4` is a per-test value that gives the same behaviour for every scheme; the 1D value would only be safe for the `lax_friedrichs` and `maccormack_viscous` runs.
+The 1D reference uses `cfl = 0.9` for tests 1, 2, 3, 5 and `cfl = 0.4` only for test 4. In 2D the same MacCormack scheme that runs at `cfl = 0.9` in 1D fails within 6-20 steps on tests 3, 5, 7 and 9, because the predictor picks up a y-velocity from the x-pressure gradient and the corrector amplifies it. The conservative `cfl = 0.4` is therefore the default for every test whose initial data contains a strong x-discontinuity (1, 2, 3, 4, 5, 6, 9, 10); the two Liska quadrant problems (7 and 8) have no such discontinuity and keep the 1D value `0.9`. The 1D value would only be safe for the `lax_friedrichs` and `maccormack_viscous` runs.
 
 ## Repository layout
 
 ```
 .
-├── Euler2D.py              # the only solver file (≈ 1785 lines)
+├── Euler2D.py              # the only solver file (≈ 1812 lines)
 ├── .gitignore
 ├── README.md               # this file
 └── outputs/                # CSV + PNG for each test, committed
@@ -429,7 +439,7 @@ The repository is intentionally a single-file solver to keep the diff with the 1
 | `U` shape | `(3, nx)` | `(4, ny+2, nx+2)` |
 | Flux | `F` only | `F` and `G` |
 | CFL | `cfl / (|u|/dx + a/dx)` | `cfl / (|u|/dx + |v|/dy + a*(1/dx + 1/dy))` |
-| Default `cfl` | `0.9` (1, 2, 3, 5, 6), `0.4` (4) | `0.4` for every test |
+| Default `cfl` | `0.9` (1, 2, 3, 5, 6), `0.4` (4) | `0.4` for tests 1-6, 9, 10; `0.9` for tests 7, 8 |
 | Default `nx` for test 6 | `10000` | `300` (limited by RAM) |
 | Default `ny` | n/a | `max(50, nx//4)`, or `max(20, nx//10)` for test 6 |
 | Default `t_end` for test 4 | `0.5/C + 0.3/Wr` | identical formula |
@@ -450,7 +460,7 @@ The shock reflection off the right wall is the 2D code's flagship test. Four ind
 
 4. **Visualization bug.** `plot_results_2d` showed a flat-line `p_y` for the y-averaged pressure on a y-uniform 2D field, which was misleading. It now shows `p_y - mean(p_y)`, a quantity at the level of float noise (~1e-16) that confirms the y direction is uniform, as the initial condition requires.
 
-After these four fixes all four schemes give `Delta P in [3.988, 3.999]` for `M = 2`, matching the 1D table to four significant figures.
+After these four fixes all four schemes give `Delta P in [3.999, 4.000]` for `M = 2`, matching the 1D table to four significant figures.
 
 ## Requirements
 
