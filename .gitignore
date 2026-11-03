@@ -32,3 +32,4 @@ _inspect_*.py
 _diag_*.py
 _try_*.py
 _memcheck.py
+_verify_*.py

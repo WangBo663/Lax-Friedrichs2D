@@ -681,6 +681,17 @@ def _limited_differences_2d_ghosted(field: np.ndarray) -> tuple[np.ndarray, np.n
     field shape: (4, ny+2, nx+2).  The physical domain is [:, 1:-1, 1:-1].
     We compute the limited difference at every physical interface; the limit
     selector of equation (46) is applied on the three-cell stencil of dX and dY.
+
+    A zero neighbour difference carries no sign information.  It appears
+    wherever a zero-gradient wall makes the ghost row identical to the first
+    physical row, so the interface difference there is exactly 0.  Treating
+    that zero as "opposite sign" would fail the three-cell test at the first
+    interior interface, zero the limited difference and leave the strong
+    diffusion of the boundary row uncancelled -- a visible artefact along the
+    top and bottom of the Case 18 figure.  A zero neighbour is therefore
+    skipped in the sign test and dropped from the magnitude constraint, so the
+    limiter keeps working on the interior while the boundary interface is
+    left unlimited.
     """
     dX = field[:, 1:-1, 1:] - field[:, 1:-1, :-1]   # (4, ny, nx+1)
     limX = np.zeros_like(dX)
@@ -688,9 +699,12 @@ def _limited_differences_2d_ghosted(field: np.ndarray) -> tuple[np.ndarray, np.n
         prev = dX[:, :, :-2]
         cur = dX[:, :, 1:-1]
         nxt = dX[:, :, 2:]
-        same = (np.sign(prev) == np.sign(cur)) & (np.sign(cur) == np.sign(nxt))
-        mag = np.minimum(np.minimum(8.0 * np.abs(prev), np.abs(cur)),
-                         8.0 * np.abs(nxt))
+        sp, sc, sn = np.sign(prev), np.sign(cur), np.sign(nxt)
+        same = (np.where(sp == 0.0, sc == sn, sp == sc)
+                & np.where(sn == 0.0, sp == sc, sc == sn))
+        lo = np.where(sp == 0.0, np.inf, 8.0 * np.abs(prev))
+        hi = np.where(sn == 0.0, np.inf, 8.0 * np.abs(nxt))
+        mag = np.minimum(np.minimum(lo, np.abs(cur)), hi)
         limX[:, :, 1:-1] = np.where(same, mag * np.sign(cur), 0.0)
 
     dY = field[:, 1:, 1:-1] - field[:, :-1, 1:-1]   # (4, ny+1, nx)
@@ -699,9 +713,12 @@ def _limited_differences_2d_ghosted(field: np.ndarray) -> tuple[np.ndarray, np.n
         prev = dY[:, :-2, :]
         cur = dY[:, 1:-1, :]
         nxt = dY[:, 2:, :]
-        same = (np.sign(prev) == np.sign(cur)) & (np.sign(cur) == np.sign(nxt))
-        mag = np.minimum(np.minimum(8.0 * np.abs(prev), np.abs(cur)),
-                         8.0 * np.abs(nxt))
+        sp, sc, sn = np.sign(prev), np.sign(cur), np.sign(nxt)
+        same = (np.where(sp == 0.0, sc == sn, sp == sc)
+                & np.where(sn == 0.0, sp == sc, sc == sn))
+        lo = np.where(sp == 0.0, np.inf, 8.0 * np.abs(prev))
+        hi = np.where(sn == 0.0, np.inf, 8.0 * np.abs(nxt))
+        mag = np.minimum(np.minimum(lo, np.abs(cur)), hi)
         limY[:, 1:-1, :] = np.where(same, mag * np.sign(cur), 0.0)
 
     return limX, limY
