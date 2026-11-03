@@ -311,16 +311,18 @@ Stability on the 2D test suite (`cfl = 0.4`, `b = 1.0`):
 | --- | :---: | :---: | :---: | :---: |
 | 1 | stable | stable | stable | stable |
 | 2 | stable | stable | stable | stable |
-| 3 | stable | **fails** (step 12) | stable | **fails** (step 12) |
+| 3 | stable | **fails** (step 12) | stable | stable |
 | 4 | stable | stable | stable | stable |
-| 5 | stable | **fails** (step 20) | stable | **fails** (step 21) |
-| 6 | stable | stable | stable | **fails** (step 427) |
-| 7 | stable | **fails** | stable | **fails** |
-| 8 | stable | stable | stable | **fails** |
+| 5 | stable | **fails** (step 20) | stable | stable |
+| 6 | stable | stable | stable | stable |
+| 7 | stable | **fails** | stable | **fails** (step 18, CFL 0.9) |
+| 8 | stable | stable | stable | stable |
 | 9 | stable | **fails** | stable | stable |
-| 10 | stable | see CSV | stable | see CSV |
+| 10 | stable | stable | stable | stable |
 
-**19 / 24** combinations are stable at the default `cfl = 0.4`. The instability is the well-known 2D flaw of the predictor–corrector MacCormack: the antisymmetric forward/backward sweep treats the y-direction pressure gradient `G[2] = p` at a strong x-discontinuity as a real transverse velocity, and `rho` goes negative within ~20 steps. SHASTA fails for the same reason — its transport step is MacCormack. The numerical viscosity of `maccormack_viscous` (equation 41) suppresses the y-direction spurious mode at the cost of a tunable `b`, exactly as the paper warns.
+**22 / 24** combinations are stable at the default `cfl = 0.4`. The remaining instabilities are the well-known 2D flaw of the predictor–corrector MacCormack: the antisymmetric forward/backward sweep treats the y-direction pressure gradient `G[2] = p` at a strong x-discontinuity as a real transverse velocity, and `rho` goes negative within ~20 steps. The numerical viscosity of `maccormack_viscous` (equation 41) suppresses the y-direction spurious mode at the cost of a tunable `b`, exactly as the paper warns.
+
+SHASTA survives every test at `cfl = 0.4` because the FCT limiter controls that spurious mode. Test 7 still fails, but only at its own default `cfl = 0.9` (which exceeds the two-dimensional limit `1/sqrt(3) = 0.577`); at `cfl = 0.4` it runs to completion.
 
 A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); the diagnostic values in the CSV come from the last good step. The Lax–Friedrichs scheme and `maccormack_viscous` survive every test in the suite; that is the practical lower bound of this 2D code base. Test 9 (implosion) previously reported a SHASTA failure as well — that was caused by a boundary bug (the reflecting top and bottom walls did not flip the y-momentum); after the fix SHASTA completes all 249 steps and the flow matches Liska & Wendroff Fig. 29.
 
@@ -333,15 +335,16 @@ A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); 
 | `lax_friedrichs` | yes | 613 | 0.14716 | 44.1 | 1.0 - 1.0 | 0 | 0 |
 | `maccormack` | yes | 613 | 0.00000 | 0 | 1.0 - 1.0 | 0 | 0 |
 | `maccormack_viscous` | yes | 613 | 0.00000 | 0 | 1.0 - 1.0 | 0 | 0 |
-| `shasta` | yes | 617 | 0.02007 | 6.0 | 1.0 - 1.0 | 0 | 0 |
+| `shasta` | yes | 613 | 0.02007 | 6.0 | 1.0 - 1.0 | 0 | 0 |
 
 What the numbers say:
 
 - **The pressure never changes** (`p = 1` everywhere) and the flow stays at rest (`u = v = 0`, `M = 0` everywhere). The contact at `x = 0.5` is *equal-pressure and stationary*, so it generates no wave and nothing travels to the reflecting wall at `x = 1`.
 - The only numerical feature is the **smearing of the contact by the artificial viscosity**. Lax–Friedrichs spreads the density jump over 44 cells (0.147 in physical units); at `x = 0.5` the density sits at 0.667 instead of the correct 1.0 or 0.3333. MacCormack and MacCormack-with-viscosity keep the contact essentially sharp (width 0), SHASTA keeps it to 6 cells.
-- **SHASTA and the zero-gradient walls.** The limiter of equation (46) uses a three-cell sign test, `sign(prev) == sign(cur) == sign(nxt)`. A zero-gradient wall makes the ghost row identical to the first physical row, so the interface difference there is exactly 0; the original code read that zero as "opposite sign", failed the test at the first interior interface and forced the limited difference to zero. The strong diffusion of the boundary row could then no longer be cancelled by anti-diffusion and the density overshoot leaked several rows into the domain — visible as white fringes along the top and bottom of the SHASTA panel. A zero neighbour is now treated as "no sign information": it is skipped in the sign test and dropped from the magnitude constraint. The overshoot drops from 0.43 % (`rho_min = 0.32990`) to 0.08 % (`rho_min = 0.33306`) while every other scheme and the contact width are unchanged.
+- **SHASTA and the boundary ring.** The strong diffusion `nu*lap` of equation (43) was originally evaluated on the *physical* array, which has no ghost values, so it only reached the inner block (rows `1..ny-2`, columns `1..nx-2`) while the boundary ring kept the raw MacCormack transport. Every test starts from a field that is uniform in `y`, so the two supports disagree as soon as the scheme meets an x-discontinuity: the interior is smoothed, the boundary ring is not, and the field stops being uniform in `y`. In Case 18 the contact runs along `x`, so the interior was smeared while the boundary ring kept it sharp, and the density contours grew a white "fur" along the top and the bottom of the SHASTA panel. The same mismatch made the y-momentum of the 1D lifts drift. The Laplacian is now taken on the ghosted array, so the boundary ring receives the one-sided stencil that matches the ghost installed by `apply_ghost_bc`, and the anti-diffusion covers the same cells as the strong diffusion. The y-defect `max |rho[row 0] - rho[row ny/2]|` drops from `0.275` to exactly `0`, and the density range tightens from `[0.32990, 1.00343]` to `[0.33333, 1.00000]`.
+- A second, smaller defect lived in the limit selector of equation (46): its three-cell sign test reads `sign(prev) == sign(cur) == sign(nxt)`, and a zero-gradient wall makes the ghost row identical to the first physical row, so the wall interface difference is exactly 0. The original code read that zero as "opposite sign", failed the test at the first interior interface and forced the limited difference to zero. A wall interface difference that is exactly zero now counts as "no sign information": it is skipped in the sign test and dropped from the magnitude constraint. The exemption is deliberately restricted to the wall interfaces — exempting every zero difference lets the limiter take a value far larger than its neighbours and destroys monotonicity (test 1 then blows up at step 545).
 - The measured spreading matches the diffusive estimate `sqrt(nu*t)`: with `nu ~ cfl*a*dx/2 = 7.9e-4` this gives `sqrt(nu*T) = 0.0126`, and the 44-cell width corresponds to roughly `2*sqrt(nu*T)/dx = 7.6` cells — the same order, so the LF contact width is pure first-order diffusion, not a scheme error.
-- The solution stays **exactly uniform in y** (`max |rho - mean_y(rho)| = 7.7e-15`, `max |v| = 0`), which confirms the 2D boundary handling introduces no spurious transverse structure for this 1D-in-y problem.
+- The solution stays **exactly uniform in y** (`max |rho - mean_y(rho)| = 7.7e-15`, `max |v| = 0`), which confirms the 2D boundary handling introduces no spurious transverse structure for this 1D-in-y problem. The SHASTA panel needed a fix to reach that state: the strong diffusion used to be restricted to the inner block, so the boundary ring kept the raw transport and the contact was smeared in the interior but not at the wall (see the SHASTA bullet above).
 
 The picture can be reproduced with:
 
@@ -356,7 +359,7 @@ py ./Euler2D.py --test 10 --method all --no-show
 | `lax_friedrichs` | yes | 1368 | 0.7843 | 18.92 | 19.20 | 3.01 | 0.98 |
 | `maccormack` | yes | 1511 | 0.7943 | 18.96 | 23.46 | 4.57 | 1.68 |
 | `maccormack_viscous` | yes | 1382 | 0.7910 | 18.77 | 20.97 | 3.03 | 0.99 |
-| `shasta` | **no** (step 78) | 78 | - | - | - | - | - |
+| `shasta` | yes | 1376 | 0.7910 | 18.81 | 20.25 | 3.07 | 1.00 |
 
 - The M = 3 shock travels at 6.148 and reaches the wall at `t = 0.0813`, so by `T = 0.2` the visible front at `x ≈ 0.78` is the **reflected** shock, and the high-pressure region `p ~ 19` sits between the reflected front and the wall.
 - The wall state is physically right: the reflected shock brings the gas to rest against the wall (`u_wall = -0.0005`), exactly like test 4.
@@ -403,7 +406,7 @@ The 1D reference uses `cfl = 0.9` for tests 1, 2, 3, 5 and `cfl = 0.4` only for 
 
 ```
 .
-├── Euler2D.py              # the only solver file (≈ 1730 lines)
+├── Euler2D.py              # the only solver file (≈ 1785 lines)
 ├── .gitignore
 ├── README.md               # this file
 └── outputs/                # CSV + PNG for each test, committed

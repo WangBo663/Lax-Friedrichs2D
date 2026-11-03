@@ -675,6 +675,45 @@ def maccormack_step(U: np.ndarray, dx: float, dy: float, dt: float,
     return scratch
 
 
+def _shasta_limit(prev: np.ndarray, cur: np.ndarray, nxt: np.ndarray,
+                  wall_prev: np.ndarray, wall_next: np.ndarray) -> np.ndarray:
+    """Apply the SHASTA limit selector of equation (46) on a three-cell stencil.
+
+    ``prev``, ``cur`` and ``nxt`` are the interface differences entering and
+    leaving the interface under consideration.  ``wall_prev`` and ``wall_next``
+    mark the stencil entries that were taken from a *wall* interface.
+
+    A wall interface difference that is exactly zero -- which is what a
+    zero-gradient wall produces, because the ghost row equals the first
+    physical row -- carries no sign information.  Reading ``sign(0) == 0`` as
+    "opposite sign" switches the limiter off at the first interior interface
+    next to the wall.  The FCT then cannot cancel the strong diffusion of the
+    boundary row, and the density overshoots by 0.43 % in a thin layer along
+    the wall; in the Case 18 figure this showed up as a white "fur" fringing
+    the top and the bottom of the SHASTA panel.  Such a stencil entry is
+    therefore skipped in the sign test and dropped from the magnitude
+    constraint, which restores the FCT cancellation there.
+
+    The exemption is deliberately restricted to the wall interfaces.  An
+    *interior* difference that happens to be exactly zero (a locally uniform
+    stretch of the field) still carries the sign information of the stencil and
+    must keep the limiter switched off there.  Exempting it as well lets the
+    limiter take a value far larger than its neighbours and destroys
+    monotonicity: with a global exemption test 1, whose initial condition is
+    uniform in y, blows up at step 545 because the limiter produces a limited
+    difference of -1.21 next to differences of order 1e-3.
+    """
+    sp, sc, sn = np.sign(prev), np.sign(cur), np.sign(nxt)
+    zero_prev = (sp == 0.0) & wall_prev
+    zero_next = (sn == 0.0) & wall_next
+    same = (np.where(zero_prev, sc == sn, sp == sc)
+            & np.where(zero_next, sp == sc, sc == sn))
+    lo = np.where(zero_prev, np.inf, 8.0 * np.abs(prev))
+    hi = np.where(zero_next, np.inf, 8.0 * np.abs(nxt))
+    mag = np.minimum(np.minimum(lo, np.abs(cur)), hi)
+    return np.where(same, mag * np.sign(cur), 0.0)
+
+
 def _limited_differences_2d_ghosted(field: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Return limited interface differences in x and y on a ghosted array.
 
@@ -682,44 +721,35 @@ def _limited_differences_2d_ghosted(field: np.ndarray) -> tuple[np.ndarray, np.n
     We compute the limited difference at every physical interface; the limit
     selector of equation (46) is applied on the three-cell stencil of dX and dY.
 
-    A zero neighbour difference carries no sign information.  It appears
-    wherever a zero-gradient wall makes the ghost row identical to the first
-    physical row, so the interface difference there is exactly 0.  Treating
-    that zero as "opposite sign" would fail the three-cell test at the first
-    interior interface, zero the limited difference and leave the strong
-    diffusion of the boundary row uncancelled -- a visible artefact along the
-    top and bottom of the Case 18 figure.  A zero neighbour is therefore
-    skipped in the sign test and dropped from the magnitude constraint, so the
-    limiter keeps working on the interior while the boundary interface is
-    left unlimited.
+    The interface array of an axis carries one extra entry on each side: the
+    first and the last entry are the *wall* interfaces (ghost against the
+    nearest physical cell), the entries in between are the interior ones.  Only
+    the wall interfaces may take part in the zero-neighbour exemption described
+    in `_shasta_limit`; every interior interface uses the plain three-cell sign
+    test, so the limiter behaves exactly as in the reference implementation
+    away from the walls.
     """
     dX = field[:, 1:-1, 1:] - field[:, 1:-1, :-1]   # (4, ny, nx+1)
     limX = np.zeros_like(dX)
     if dX.shape[2] >= 3:
-        prev = dX[:, :, :-2]
-        cur = dX[:, :, 1:-1]
-        nxt = dX[:, :, 2:]
-        sp, sc, sn = np.sign(prev), np.sign(cur), np.sign(nxt)
-        same = (np.where(sp == 0.0, sc == sn, sp == sc)
-                & np.where(sn == 0.0, sp == sc, sc == sn))
-        lo = np.where(sp == 0.0, np.inf, 8.0 * np.abs(prev))
-        hi = np.where(sn == 0.0, np.inf, 8.0 * np.abs(nxt))
-        mag = np.minimum(np.minimum(lo, np.abs(cur)), hi)
-        limX[:, :, 1:-1] = np.where(same, mag * np.sign(cur), 0.0)
+        n_if = dX.shape[2]
+        wall_prev = np.zeros((1, 1, n_if - 2), dtype=bool)
+        wall_prev[0, 0, 0] = True
+        wall_next = np.zeros((1, 1, n_if - 2), dtype=bool)
+        wall_next[0, 0, -1] = True
+        limX[:, :, 1:-1] = _shasta_limit(dX[:, :, :-2], dX[:, :, 1:-1], dX[:, :, 2:],
+                                         wall_prev, wall_next)
 
     dY = field[:, 1:, 1:-1] - field[:, :-1, 1:-1]   # (4, ny+1, nx)
     limY = np.zeros_like(dY)
     if dY.shape[1] >= 3:
-        prev = dY[:, :-2, :]
-        cur = dY[:, 1:-1, :]
-        nxt = dY[:, 2:, :]
-        sp, sc, sn = np.sign(prev), np.sign(cur), np.sign(nxt)
-        same = (np.where(sp == 0.0, sc == sn, sp == sc)
-                & np.where(sn == 0.0, sp == sc, sc == sn))
-        lo = np.where(sp == 0.0, np.inf, 8.0 * np.abs(prev))
-        hi = np.where(sn == 0.0, np.inf, 8.0 * np.abs(nxt))
-        mag = np.minimum(np.minimum(lo, np.abs(cur)), hi)
-        limY[:, 1:-1, :] = np.where(same, mag * np.sign(cur), 0.0)
+        n_if = dY.shape[1]
+        wall_prev = np.zeros((1, n_if - 2, 1), dtype=bool)
+        wall_prev[0, 0, 0] = True
+        wall_next = np.zeros((1, n_if - 2, 1), dtype=bool)
+        wall_next[0, -1, 0] = True
+        limY[:, 1:-1, :] = _shasta_limit(dY[:, :-2, :], dY[:, 1:-1, :], dY[:, 2:, :],
+                                         wall_prev, wall_next)
 
     return limX, limY
 
@@ -733,22 +763,44 @@ def shasta_step(U: np.ndarray, dx: float, dy: float, dt: float,
     1/8 to keep the limiter well-conditioned when the time step is small.
     The anti-diffusion uses the same factor in both x and y; this is the simplest
     2D extension of the 1D SHASTA scheme (Boris & Book, 1976, sec. 2).
+
+    The strong diffusion is evaluated on the *ghosted* array, so that the
+    boundary ring of the physical domain receives the one-sided stencil that
+    matches the ghost value installed by `apply_ghost_bc`.  Computing the
+    Laplacian on the physical array instead -- which has no ghost values --
+    restricts the strong diffusion to the inner block and leaves the boundary
+    ring with the raw MacCormack transport.  Every test starts from a field
+    that is uniform in y, so the two supports disagree as soon as the scheme
+    meets an x-discontinuity: the interior is smoothed and the boundary ring
+    is not, the field stops being uniform in y, and the density contours of
+    the Case 18 figure grow a white "fur" along the top and the bottom.  The
+    same mismatch used to make the y-momentum of the 1D lifts drift.
+
+    The strong and the anti-diffusion now cover exactly the same cells, so
+    they cancel in smooth regions and the FCT keeps the solution monotone.
     """
     transported = maccormack_step(U, dx, dy, dt, gamma, test_case, viscosity_b=0.0)
-    transported_phys = _strip_ghost(transported)
+    transported_ghost = _add_ghost(_strip_ghost(transported))
+    apply_ghost_bc(transported_ghost, test_case)
 
-    interior_phys = (slice(None), slice(1, -1), slice(1, -1))
-    U_phys = U[:, 1:-1, 1:-1]
-    lap_x = U_phys[:, :, 2:] - 2.0 * U_phys[:, :, 1:-1] + U_phys[:, :, :-2]
-    lap_y = U_phys[:, 2:, :] - 2.0 * U_phys[:, 1:-1, :] + U_phys[:, :-2, :]
     nu_diff = max(0.5 * (dt / dx) * (1.0 - dt / dx), 0.125)
-    diffused = transported_phys.copy()
-    diffused[interior_phys] = (transported_phys[interior_phys]
-                               + nu_diff * lap_x[:, 1:-1, :]
-                               + nu_diff * lap_y[:, :, 1:-1])
-    diffused_ghost = _add_ghost(diffused)
+
+    # Ghosted Laplacians: the ghost rows and columns carry the zero-gradient
+    # or the reflected values, so the boundary ring automatically uses the
+    # matching one-sided stencil.
+    lap_x = np.zeros_like(transported_ghost)
+    lap_x[:, :, 1:-1] = (transported_ghost[:, :, 2:]
+                         - 2.0 * transported_ghost[:, :, 1:-1]
+                         + transported_ghost[:, :, :-2])
+    lap_y = np.zeros_like(transported_ghost)
+    lap_y[:, 1:-1, :] = (transported_ghost[:, 2:, :]
+                         - 2.0 * transported_ghost[:, 1:-1, :]
+                         + transported_ghost[:, :-2, :])
+
+    diffused_phys = (_strip_ghost(transported_ghost)
+                      + nu_diff * (lap_x[:, 1:-1, 1:-1] + lap_y[:, 1:-1, 1:-1]))
+    diffused_ghost = _add_ghost(diffused_phys)
     apply_ghost_bc(diffused_ghost, test_case)
-    diffused = _strip_ghost(diffused_ghost)
 
     if use_limiter:
         limX, limY = _limited_differences_2d_ghosted(diffused_ghost)
@@ -756,13 +808,12 @@ def shasta_step(U: np.ndarray, dx: float, dy: float, dt: float,
         limX = diffused_ghost[:, 1:-1, 1:] - diffused_ghost[:, 1:-1, :-1]
         limY = diffused_ghost[:, 1:, 1:-1] - diffused_ghost[:, :-1, 1:-1]
 
-    out = diffused.copy()
-    out[interior_phys] = (
-        diffused[interior_phys]
-        - (limX[:, :, 1:] - limX[:, :, :-1])[interior_phys] * nu_diff
-        - (limY[:, 1:, :] - limY[:, :-1, :])[interior_phys] * nu_diff
-    )
-    return _add_ghost(out)
+    # The anti-diffusion covers the whole physical domain, matching the
+    # support of the strong diffusion.
+    out_phys = (diffused_phys
+                - nu_diff * ((limX[:, :, 1:] - limX[:, :, :-1])
+                             + (limY[:, 1:, :] - limY[:, :-1, :])))
+    return _add_ghost(out_phys)
 
 
 # ---------------------------------------------------------------------------
