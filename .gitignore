@@ -31,3 +31,4 @@ _sync_*.py
 _inspect_*.py
 _diag_*.py
 _try_*.py
+_memcheck.py
