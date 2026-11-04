@@ -55,7 +55,7 @@ Tests 7-9 are genuine 2D Riemann problems taken from Liska & Wendroff (2001), an
 | 7 | Liska & Wendroff case 3 (S,S,S,S) | [0, 1]² | none | `(200, 200, 0.9, 0.3)` |
 | 8 | Liska & Wendroff case 4 (S,S,S,S) | [0, 1]² | none | `(200, 200, 0.9, 0.25)` |
 | 9 | Implosion diamond | [0, 0.3]² | all | `(150, 150, 0.4, 0.045)` — late stage `T = 2.5` |
-| 10 | **Homework Case 18** (vertical equal-pressure contact) | [0, 1]² | right | `(300, 300, 0.4, 0.2)` |
+| 10 | **Homework Case 18** (four-quadrant shock + contact) | [0, 1]² | none | `(300, 300, 0.4, 0.2)` |
 
 End times for tests 2 and 4 are derived from the Rankine–Hugoniot relations (`shock_relations` in `Euler2D.py`), so the wave configuration is the intended one for any Mach number. With `rho = p = 1` ahead of the shock, the incident shock speed is `C = M*sqrt(gamma)`, the wall sits at `x = 0.5`, and the reflected shock travels back at speed `Wr = rho2*u2/(rho5-rho2)`:
 
@@ -64,30 +64,26 @@ End times for tests 2 and 4 are derived from the Rankine–Hugoniot relations (`
 
 For `M = 2` this gives `t_test_2 = 0.1479` and `t_test_4 = 0.4648` — the 1D README's Test 4 value. A fixed `t = 0.2` would be shorter than the 0.211 the shock needs to reach the wall, so no reflection would occur at all.
 
-### Test 10 — homework Case 18 (NOT a Liska case)
+### Test 10 — homework Case 18 (a custom four-quadrant Riemann problem)
 
-This is the assignment's own problem, so it has no reference figure in the paper. It is a vertical equal-pressure contact discontinuity at `x = 0.5` on the unit square, with a reflecting wall at `x = 1`:
+This is the assignment's own problem (no reference figure in the Liska & Wendroff paper). Like cases 3 and 4, it is a four-quadrant Riemann problem on the unit square `[0,1]²`: a vertical **Mach-3 shock** sits on `x = 0.5` (left column = post-shock state) and a horizontal **contact discontinuity** sits on `y = 0.5` in the right column:
 
-| Region | rho | p | u | v |
+| Quadrant | rho | p | u | v |
 | --- | --- | --- | --- | --- |
-| `x < 0.5` | 1 | 1 | 0 | 0 |
-| `x > 0.5` | 1/3 | 1 | 0 | 0 |
+| NW / SW (`x < 0.5`) | 3.85714 | 10.33333 | 2.62937 | 0 |
+| NE (`x > 0.5, y > 0.5`) | 1 | 1 | 0 | 0 |
+| SE (`x > 0.5, y < 0.5`) | 1/3 | 1 | 0 | 0 |
 
-Boundary conditions:
+The post-shock state follows from the Rankine–Hugoniot relations for a Mach-3 shock running into gas at `rho = 1, p = 1` (with `a = sqrt(gamma)`):
 
-- `x = 1`: solid wall — `rho_ghost = rho_inner`, `p_ghost = p_inner`, `u_ghost = -u_inner`, `v_ghost = v_inner`
-- `x = 0` and `y = 0, 1`: zero-gradient extrapolation
+    rho_1 = (gamma+1) M^2 / ((gamma-1) M^2 + 2)    = 3.85714
+    p_1   = (2 gamma M^2 - (gamma-1)) / (gamma+1)  = 10.33333
+    u_1   = (2 a / (gamma+1)) (M - 1/M)            = 2.62937
 
-End time `T = 0.2`. The default run uses a **300×300** grid; use `--case18-nx 300 1000` to run the two resolutions and produce the grid-convergence comparison.
-
-**Important physical caveat.** As stated, both sides have `p = 1` and `u = v = 0`, so the contact is *stationary* and equal-pressure: no wave is generated, nothing travels to the wall, and `M = 0` everywhere. The only feature the solver produces is the numerical smearing of the contact by the first-order Lax–Friedrichs artificial viscosity. The `--case18-mode shock` variant therefore exists as well: it places a Mach-3 incident shock on the `x = 0.5` line (post-shock state computed from the Rankine–Hugoniot relations for an upstream `rho = 1/3, p = 1` gas), which makes the flow really reach the reflecting wall and produce the reflected-shock flow field the notes describe.
+Boundary conditions are zero-gradient (outflow) on all four sides, exactly as for cases 3 and 4 — there is no wall. The default run uses a **300×300** grid and `T = 0.2`; use `--case18-nx 300 1000` to run the two resolutions and produce the grid-convergence comparison.
 
 ```bash
-# verbatim assignment initialisation (stationary contact)
-py ./Euler2D.py --test 10 --case18-mode contact --no-show
-
-# with the M = 3 incident shock added
-py ./Euler2D.py --test 10 --case18-mode shock --no-show
+py ./Euler2D.py --test 10 --method all --no-show
 ```
 
 ### Boundary tag per test
@@ -96,8 +92,8 @@ The 1D code applies per-test rules in a single `apply_bc`; the 2D code mirrors t
 
 | Tag | Meaning | Used by |
 | --- | --- | --- |
-| `none` | zero-gradient on every side | tests 1, 2, 3, 6, 7, 8 |
-| `right` | reflecting wall on the right edge only | tests 4, 10 |
+| `none` | zero-gradient on every side | tests 1, 2, 3, 6, 7, 8, 10 |
+| `right` | reflecting wall on the right edge only | test 4 |
 | `both` | reflecting walls on both edges in x | test 5 |
 | `all` | reflecting walls on all four sides | test 9 (implosion) |
 
@@ -222,10 +218,10 @@ py ./Euler2D.py --test 9 --method lax_friedrichs --nx 150 --ny 150
 
 Use `--nx 400 --ny 400` to reproduce the paper's 400×400 resolution. The implosion's late stage (the jet along the axes) needs `--t-end 2.5`.
 
-**Test 10, homework Case 18.** One picture per resolution, so a finer second run never overwrites the first:
+**Test 10, homework Case 18.** A four-quadrant shock + contact Riemann problem (see above). One picture per resolution, so a finer second run never overwrites the first:
 
 ```bash
-py ./Euler2D.py --test 10 --case18-mode contact --no-show
+py ./Euler2D.py --test 10 --method all --no-show
 ```
 
 produces
@@ -284,7 +280,7 @@ for n in 1 2 3 4 5 6; do python Euler2D.py --test $n --no-show; done
 | `--t-end` | per-test | one or more final times; defaults are derived from the shock relations |
 | `--mach` | per-test | Mach number for tests 1, 2 and 4 |
 | `--b` | `1.0` | artificial-viscosity coefficient of equation (41) |
-| `--case18-mode` | `contact` | test 10 only: `contact` = verbatim assignment initialisation, `shock` = adds the M=3 incident shock |
+| `--case18-mode` | `contact` | deprecated; kept for backward compatibility and ignored (Case 18 is a fixed four-quadrant problem) |
 | `--case18-nx` | `300` | test 10 only: list of square grid sizes; more than one additionally writes `test10_grid_convergence.png` |
 | `--scan-viscosity` | off | scan `b in [0, 0.2, 0.5, 1.0, 1.5, 2.0]` and select the best physical case |
 | `--no-limiter` | off | switch the SHASTA limiter off, reproducing the unlimited case discussed in the paper |
@@ -318,9 +314,9 @@ Stability on the 2D test suite (per-test default CFL: `0.4` for tests 1-6, 9, 10
 | 7 | stable | **fails** (step 50) | stable | stable |
 | 8 | stable | stable | stable | stable |
 | 9 | stable | **fails** (step 6) | stable | stable |
-| 10 | stable | stable | stable | stable |
+| 10 | stable | **fails** | stable | stable |
 
-**42 / 48** combinations are stable (10 tests x 4 schemes, with test 5 contributing three end times, so 48 runs in total; each test uses its own default CFL). Every remaining instability is the bare `maccormack` scheme, and the four failing cases do not share a single mechanism — see "Why the bare MacCormack fails" below for the measurements. In every failure the *pressure* goes negative first while the density stays positive; Lax–Friedrichs and `maccormack_viscous` survive every test in the suite, and SHASTA survives every test as well.
+**41 / 48** combinations are stable (10 tests x 4 schemes, with test 5 contributing three end times, so 48 runs in total; each test uses its own default CFL). Every remaining instability is the bare `maccormack` scheme, and the five failing cases do not share a single mechanism — see "Why the bare MacCormack fails" below for the measurements. In every failure the *pressure* goes negative first while the density stays positive; Lax–Friedrichs and `maccormack_viscous` survive every test in the suite, and SHASTA survives every test as well.
 
 **SHASTA now survives every test in the suite**, because the FCT limiter restores the monotonicity that the bare MacCormack loses at a strong discontinuity. Test 7 (Liska case 3) used to fail at step 18; the cause was the lower clamp on the FCT diffusion factor, not the case itself — see "the clamp on the FCT diffusion factor" below. It now runs to completion in 281 steps.
 
@@ -328,76 +324,29 @@ A "fails" run is terminated by the `is_physical` check (`rho > 0` and `p > 0`); 
 
 ### Test 10 results — Case 18 (homework)
 
-**Mode `contact` (the assignment's verbatim initialisation), 300x300, CFL 0.4, T = 0.2:**
+Case 18 is a four-quadrant Riemann problem (a Mach-3 shock meeting a `rho = 1/3`
+contact), so — like cases 7-9 — it has **no exact solution**; the reference
+comparison is the figure: pressure colour map, `dP = 0.1` pressure isolines,
+density contours and velocity arrows (the `plot_case18_2d` panel).
 
-| Scheme | stable | steps | 10-90% contact width | in cells | p range | u range | max M |
-| --- | :---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `lax_friedrichs` | yes | 613 | 0.14716 | 44.1 | 1.0 - 1.0 | 0 | 0 |
-| `maccormack` | yes | 613 | 0.00000 | 0 | 1.0 - 1.0 | 0 | 0 |
-| `maccormack_viscous` | yes | 613 | 0.00000 | 0 | 1.0 - 1.0 | 0 | 0 |
-| `shasta` | yes | 613 | 0.01338 | 4.0 | 1.0 - 1.0 | 0 | 0 |
+The interesting physics happens around the centre `(0.5, 0.5)`: the Mach-3 shock
+runs right into `rho = 1` gas in the top half, while the bottom half opens into
+the lighter `rho = 1/3` gas, so the shock and the horizontal contact refract and
+roll up into a jet. All four sides are open, so the waves leave the domain —
+there is no wall in this problem.
 
-What the numbers say:
-
-- **The pressure never changes** (`p = 1` everywhere) and the flow stays at rest (`u = v = 0`, `M = 0` everywhere). The contact at `x = 0.5` is *equal-pressure and stationary*, so it generates no wave and nothing travels to the reflecting wall at `x = 1`.
-- The only numerical feature is the **smearing of the contact by the artificial viscosity**. Lax–Friedrichs spreads the density jump over 44 cells (0.147 in physical units); at `x = 0.5` the density sits at 0.667 instead of the correct 1.0 or 0.3333. MacCormack and MacCormack-with-viscosity keep the contact essentially sharp (width 0), SHASTA keeps it to 4 cells.
-- **SHASTA and the boundary ring.** The strong diffusion `nu*lap` of equation (43) was originally evaluated on the *physical* array, which has no ghost values, so it only reached the inner block (rows `1..ny-2`, columns `1..nx-2`) while the boundary ring kept the raw MacCormack transport. Every test starts from a field that is uniform in `y`, so the two supports disagree as soon as the scheme meets an x-discontinuity: the interior is smoothed, the boundary ring is not, and the field stops being uniform in `y`. In Case 18 the contact runs along `x`, so the interior was smeared while the boundary ring kept it sharp, and the density contours grew a white "fur" along the top and the bottom of the SHASTA panel. The same mismatch made the y-momentum of the 1D lifts drift. The Laplacian is now taken on the ghosted array, so the boundary ring receives the one-sided stencil that matches the ghost installed by `apply_ghost_bc`, and the anti-diffusion covers the same cells as the strong diffusion. The y-defect `max |rho[row 0] - rho[row ny/2]|` drops from `0.275` to exactly `0`, and the density range tightens from `[0.32990, 1.00343]` to `[0.33333, 1.00000]`.
-- A second, smaller defect lived in the limit selector of equation (46): its three-cell sign test reads `sign(prev) == sign(cur) == sign(nxt)`, and a zero-gradient wall makes the ghost row identical to the first physical row, so the wall interface difference is exactly 0. The original code read that zero as "opposite sign", failed the test at the first interior interface and forced the limited difference to zero. A wall interface difference that is exactly zero now counts as "no sign information": it is skipped in the sign test and dropped from the magnitude constraint. The exemption is deliberately restricted to the wall interfaces — exempting every zero difference lets the limiter take a value far larger than its neighbours and destroys monotonicity (test 1 then blows up at step 545).
-- **The clamp on the FCT diffusion factor.** Equation (43) uses `nu = max(0.5*lambda*(1-lambda), 1/8)`. The clamp exists to keep the limiter well-conditioned when the time step is small, but the value matters more than it looks: the magnitude bound of equation (46) is *relative* (`min(8|prev|, |cur|, 8|nxt|)`), so the **absolute** anti-diffusion it permits scales with `nu`. A clamp that is too high lets the anti-diffusion push a cell outside the local range of the transported solution — exactly the condition FCT is meant to forbid. Sweeping the clamp on test 7 (Liska case 3, four quarter-waves meeting in the centre of the square) shows a sharp boundary:
-
-  | clamp | outcome |
-  | --- | --- |
-  | 0 ... 0.11 | stable, 279-281 steps |
-  | 0.115 | unstable at step 279 |
-  | 0.12 | unstable at step 74 |
-  | **0.125 (old)** | **unstable at step 18** |
-
-  At `1/8` the anti-diffusion on the energy component is about 2.2x larger than at `1/12` (4.0e-1 against 1.6e-1 on the first step); the energy leaves the local range of the transport solution from step 2 onwards, the pressure at the centre of the square decays from 2.9e-2 to 7.1e-3 and turns negative in step 18. At `1/12` the monotonicity violation stays at zero for the first twelve steps and test 7 runs to completion. The clamp now reads `max(0.5*lambda*(1-lambda), 1/12)`, which sits in the middle of the stable band with margin on both sides. Every other test keeps its previous result to within one percent in step count.
-- The measured spreading matches the diffusive estimate `sqrt(nu*t)`: with `nu ~ cfl*a*dx/2 = 7.9e-4` this gives `sqrt(nu*T) = 0.0126`, and the 44-cell width corresponds to roughly `2*sqrt(nu*T)/dx = 7.6` cells — the same order, so the LF contact width is pure first-order diffusion, not a scheme error.
-- The solution stays **exactly uniform in y** (`max |rho - mean_y(rho)| = 7.7e-15`, `max |v| = 0`), which confirms the 2D boundary handling introduces no spurious transverse structure for this 1D-in-y problem. The SHASTA panel needed a fix to reach that state: the strong diffusion used to be restricted to the inner block, so the boundary ring kept the raw transport and the contact was smeared in the interior but not at the wall (see the SHASTA bullet above).
-
-The picture can be reproduced with:
+With the strong shock the bare `maccormack` scheme fails (negative pressure), as
+it does on the other strong-discontinuity tests; `lax_friedrichs`,
+`maccormack_viscous` and `shasta` all run to completion. The picture is
+reproduced with:
 
 ```bash
 py ./Euler2D.py --test 10 --method all --no-show
 ```
 
-**Mode `shock` (M = 3 incident shock added on the `x = 0.5` line), 300x300, T = 0.2:**
-
-| Scheme | stable | steps | front x | p_wall | p_max | u_max | max M |
-| --- | :---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `lax_friedrichs` | yes | 1368 | 0.7843 | 18.92 | 19.20 | 3.01 | 0.98 |
-| `maccormack` | yes | 1511 | 0.7943 | 18.96 | 23.46 | 4.57 | 1.68 |
-| `maccormack_viscous` | yes | 1382 | 0.7910 | 18.77 | 20.97 | 3.03 | 0.99 |
-| `shasta` | yes | 1375 | 0.7910 | 18.81 | 20.18 | 3.06 | 1.00 |
-
-- The M = 3 shock travels at 6.148 and reaches the wall at `t = 0.0813`, so by `T = 0.2` the visible front at `x ≈ 0.78` is the **reflected** shock, and the high-pressure region `p ~ 19` sits between the reflected front and the wall.
-- The wall state is physically right: the reflected shock brings the gas to rest against the wall (`u_wall` between `-5.1e-4` and `+1.9e-3` across the four schemes, `3.5e-5` for SHASTA), exactly like test 4.
-
-**On the "M = 3 region" from the notes.** There is no region in the final field whose Mach number is 3:
-
-- in `contact` mode `M = 0` everywhere;
-- in `shock` mode the maximum Mach number of the *final* field is 0.98 (Lax–Friedrichs) — every part of the field is subsonic.
-
-The reason is that **M = 3 is a property of the incident shock, not of the flow field behind it.** A shock moving at Mach 3 into stationary gas leaves behind a subsonic post-shock state (here `M = 0.98`), because the shock converts the kinetic energy into pressure. If the notes mean "the flow behind the shock is at M = 3", the initialisation would have to prescribe a *uniform Mach-3 stream* rather than a Mach-3 *shock*; those are different problems.
-
-**Mode `shock` is reproduced with:**
-
-```bash
-py ./Euler2D.py --test 10 --case18-mode shock --method all --no-show --output-dir outputs_shock
-```
-
-**Reading the colour bar of the `contact` picture.** The pressure field is exactly
-constant there, and matplotlib pads a degenerate colour scale by +-10%, so a naive
-render claims a range of 0.9 - 1.1 for a field that is identically 1. The solver
-therefore pins the colour window to +-0.05 around the constant value and prints
-`p = 1 (uniform) / no pressure contours exist` on the panel, so the figure cannot
-be misread.
-
-**Re-enabling the grid-convergence study.** The assignment originally asked for a
-300x300 and a 1000x1000 comparison; the default run uses only the 300x300 grid.
-The comparison can be brought back on demand, which also writes
-`outputs/test10_grid_convergence.png`:
+**Grid convergence.** The assignment asked for a 300x300 and a 1000x1000
+comparison; the default run uses only the 300x300 grid. The comparison can be
+brought back on demand, which also writes `outputs/test10_grid_convergence.png`:
 
 ```bash
 py ./Euler2D.py --test 10 --case18-nx 300 1000 --method lax_friedrichs --no-show
@@ -474,10 +423,6 @@ For test 7 the y coupling is *required* for the failure: with `lam_y = 0` the ru
 │   ├── test10_comparison.csv
 │   ├── test10_comparison_nx300.png
 │   └── all_tests_overview.png
-└── outputs_shock/          # Case 18 in --case18-mode shock
-    ├── test10_comparison.png
-    ├── test10_comparison.csv
-    └── test10_comparison_nx300.png
 ```
 
 The repository is intentionally a single-file solver to keep the diff with the 1D reference as small as possible: every function name, flag name and `default_*` constant is reused from `Lax-Friedrichs.py`, the only new layer is the 1-cell ghost in `apply_ghost_bc` and the `flux_x` / `flux_y` split.

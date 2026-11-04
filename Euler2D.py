@@ -292,8 +292,7 @@ def boundary_kind(test_case: int) -> str:
         7: "none",   # Liska case 3: open square, waves leave the domain
         8: "none",   # Liska case 4: open square
         9: "all",    # implosion: reflecting walls on all four sides (sec. 4.7)
-        10: "right", # homework Case 18: reflecting wall at x = 1 only;
-                     # x = 0 and y = 0, 1 use zero-gradient extrapolation
+        10: "none",  # homework Case 18: four-quadrant Riemann problem, open square
     }.get(test_case, "none")
 
 
@@ -423,22 +422,18 @@ def init_test_2d(test_case: int, x: np.ndarray, y: np.ndarray,
     7 : Liska case 3  (S,S,S,S),  T = 0.3
     8 : Liska case 4  (S,S,S,S),  T = 0.25
     9 : implosion diamond, reflecting walls, T = 0.045 (early) / 2.5 (late)
-    10: **homework Case 18** (not a Liska case).  A vertical equal-pressure
-        contact discontinuity at x = 1/2 on the unit square, with a reflecting
-        wall at x = 1.  Two initialisation modes are provided:
+    10: **homework Case 18** (a custom four-quadrant Riemann problem, like
+        cases 3 and 4).  On the unit square a vertical Mach-``mach`` shock sits
+        on x = 1/2 (left column = post-shock state) and a horizontal contact
+        discontinuity sits on y = 1/2 in the right column:
 
-        ``"contact"`` (default, the verbatim assignment statement)
-            x < 1/2 : rho = 1,     p = 1, u = v = 0
-            x > 1/2 : rho = 1/3,   p = 1, u = v = 0
-            Everything is at rest, so the only feature is the stationary
-            contact.  No wave reaches the wall on its own.
+            NW (x<1/2, y>1/2): post-shock     NE (x>1/2, y>1/2): rho = 1,   p = 1
+            SW (x<1/2, y<1/2): post-shock     SE (x>1/2, y<1/2): rho = 1/3, p = 1
 
-        ``"shock"`` (adds the M = 3 incident shock the notes talk about)
-            The left half is filled with the Rankine-Hugoniot post-shock state
-            of a Mach-``mach`` shock travelling to the right, so the flow really
-            does hit the reflecting wall at x = 1 and a reflected shock with an
-            M = 3 region behind it develops.  The right half keeps the
-            rho = 1/3, p = 1 state of the assignment.
+        The post-shock state follows from the Rankine-Hugoniot relations for a
+        shock of Mach ``mach`` running into gas at rho = 1, p = 1.  Open
+        (zero-gradient) boundaries on all four sides, as for cases 3 and 4.
+        ``case18_mode`` is kept only for backward compatibility and is ignored.
 
     Returns
     -------
@@ -494,25 +489,30 @@ def init_test_2d(test_case: int, x: np.ndarray, y: np.ndarray,
         p[inside] = 0.14
 
     elif test_case == 10:
-        # Homework Case 18: vertical equal-pressure contact discontinuity at
-        # x = 1/2 on the unit square [0,1]^2, everything initially at rest.
+        # Homework Case 18: a four-quadrant 2D Riemann problem on [0,1]^2.
+        #   NW / SW (x < 1/2): Rankine-Hugoniot post-shock state of a
+        #                      Mach-``mach`` shock into rho = 1, p = 1 gas.
+        #   NE (x > 1/2, y > 1/2): rho = 1,   p = 1, u = v = 0.
+        #   SE (x > 1/2, y < 1/2): rho = 1/3, p = 1, u = v = 0  (the rho2 = 1/3
+        #                          contact discontinuity).
+        # v is zero everywhere and the right column is at rest by default.
+        a0 = float(np.sqrt(gamma))                                   # in rho = 1, p = 1
+        rho1 = (gamma + 1.0) * mach**2 / ((gamma - 1.0) * mach**2 + 2.0)
+        p1 = (2.0 * gamma * mach**2 - (gamma - 1.0)) / (gamma + 1.0)
+        u1 = (2.0 * a0 / (gamma + 1.0)) * (mach - 1.0 / mach)
+
         x_mid = 0.5 * (x[0] + x[-1])
-        right_mask = x > x_mid          # (nx,) boolean along x
-        if case18_mode == "shock":
-            # Add the M = 3 incident shock described in the notes so the flow
-            # really reaches the reflecting wall at x = 1.  The shock front
-            # sits on the V.B. line x = 1/2 and runs into the right-hand gas
-            # (rho = 1/3, p = 1, at rest); the left half carries the
-            # Rankine-Hugoniot post-shock state.
-            relations = shock_relations_into(1.0 / 3.0, 1.0, 0.0, mach, gamma)
-            rho[:, right_mask] = 1.0 / 3.0
-            rho[:, ~right_mask] = relations["rho_post"]
-            p[:, ~right_mask] = relations["p_post"]
-            u[:, ~right_mask] = relations["u_post"]
-        else:
-            # Verbatim assignment initialisation: two equal-pressure states
-            # differing only in density, both at rest.
-            rho[:, right_mask] = 1.0 / 3.0
+        y_mid = 0.5 * (y[0] + y[-1])
+        left_x = x < x_mid                # (nx,) boolean along x
+        lower_y = y < y_mid               # (ny,) boolean; y[0] at the bottom
+
+        # Left column (both quadrants) = post-shock state.
+        rho[:, left_x] = rho1
+        p[:, left_x] = p1
+        u[:, left_x] = u1
+        # Lower-right quadrant SE = contact (rho = 1/3).
+        mask = lower_y[:, None] & ~left_x[None, :]
+        rho[mask] = 1.0 / 3.0
 
     else:
         raise ValueError("test_case must be 7, 8, 9 or 10 for genuine 2D problems")
@@ -1065,10 +1065,11 @@ def physical_diagnostics(result: SimulationResult, config: SimulationConfig) -> 
         }
 
     if config.test_case == 10:
-        # Homework Case 18.  The initial condition is a vertical equal-pressure
-        # contact at x = 0.5 with a reflecting wall at x = 1.  Diagnostics:
-        # contact width (how much the first-order LF smears the discontinuity),
-        # where the pressure front sits, and the state next to the wall.
+        # Homework Case 18: a four-quadrant shock + contact Riemann problem on
+        # [0,1]^2 with open boundaries.  There is no exact solution; the
+        # y-averaged profiles below are a rough 1D summary for the CSV, while
+        # the figure (pressure map + dP = 0.1 contours + velocity arrows) is
+        # the reference comparison.
         rho_mean = np.mean(rho, axis=0)
         p_mean = np.mean(p, axis=0)
         u_mean = np.mean(u, axis=0)
@@ -1097,20 +1098,15 @@ def physical_diagnostics(result: SimulationResult, config: SimulationConfig) -> 
         else:
             level_90 = level_10 = float("nan")
 
-        # Shock front: the steepest pressure gradient along x.  In "contact"
-        # mode the pressure never changes, so the result is NaN.
+        # Shock front: the steepest pressure gradient along x.
         dpx = np.abs(np.diff(p_mean))
         if float(np.max(dpx)) > 1.0e-3:
             front_x = float(0.5 * (x[int(np.argmax(dpx))] + x[int(np.argmax(dpx)) + 1]))
         else:
             front_x = float("nan")
-        # Exact front position for the "shock" initialisation: the Mach-3
-        # incident shock leaves x = 0.5 at t = 0.
-        if config.case18_mode == "shock":
-            relations = shock_relations_into(1.0 / 3.0, 1.0, 0.0, config.mach, GAMMA)
-            exact_front = 0.5 + relations["shock_speed"] * result.time
-        else:
-            exact_front = float("nan")
+        # Reference front position: the top-half shock travels right at
+        # D = mach * sqrt(gamma) into the rho = 1, p = 1 gas from x = 0.5.
+        exact_front = 0.5 + config.mach * float(np.sqrt(GAMMA)) * result.time
 
         return {
             "contact_x": 0.5,
@@ -1169,7 +1165,7 @@ def print_diagnostics_table(test_case: int,
             )
 
     elif test_case == 10:
-        print("===== Case 18: contact discontinuity, reflecting wall at x = 1 =====")
+        print("===== Case 18: four-quadrant shock + contact (open boundaries) =====")
         print(
             f"{'Scheme':<22}{'contact w':>11}{'cells':>8}{'front x':>10}"
             f"{'err':>9}{'p_wall':>10}{'p_max':>10}{'u_max':>10}{'M_max':>9}"
@@ -1581,9 +1577,8 @@ def parse_args() -> argparse.Namespace:
                         help="Artificial-viscosity coefficient b of equation (41)")
     parser.add_argument(
         "--case18-mode", choices=["contact", "shock"], default="contact",
-        help="Test 10 (homework Case 18) initialisation: 'contact' is the verbatim "
-             "assignment statement (two equal-pressure states at rest), 'shock' adds "
-             "the M=3 incident shock so the flow reaches the reflecting wall at x=1.",
+        help="Deprecated; kept for backward compatibility and now ignored. Test 10 "
+             "(Case 18) is always the four-quadrant shock + contact Riemann problem.",
     )
     parser.add_argument(
         "--case18-nx", type=int, nargs="+", default=None,
